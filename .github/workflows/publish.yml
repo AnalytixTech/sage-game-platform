@@ -1,0 +1,32 @@
+name: Automated NPM Package Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install Monorepo Dependencies
+        run: npm install --include=dev --legacy-peer-deps
+
+      - name: Build All Monorepo Packages
+        run: npm run build
+
+      - name: Publish All Workspaces to NPM Registry
+        run: npm publish --workspaces --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
