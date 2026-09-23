@@ -45,7 +45,7 @@ This is the **most optimal, low-overhead, zero-stress deployment setup** for Sag
    - **Region**: Choose closest to your target audience (e.g. Frankfurt, Oregon, Singapore)
    - **Build Command**:
      ```bash
-     npm install --legacy-peer-deps && npm run build
+     npm install --include=dev --legacy-peer-deps && npm run build
      ```
    - **Start Command**:
      ```bash

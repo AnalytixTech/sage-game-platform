@@ -14,7 +14,7 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
     "baseUrl": ".",
-    "types": ["node", "express", "react"],
+    "types": [],
     "paths": {
       "@sagegame/types": ["packages/types/src/index.ts"],
       "@sagegame/core": ["packages/core/src/index.ts"],
