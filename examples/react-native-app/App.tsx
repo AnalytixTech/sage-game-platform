@@ -3,8 +3,8 @@ import {
   Game,
   GameCatalog,
   SageGameProvider,
-} from '@sagegame/react-native';
-import { Game as GameType, GameResult } from '@sagegame/types';
+} from '@sagegames/react-native';
+import { Game as GameType, GameResult } from '@sagegames/types';
 
 export default function App() {
   const [sessionToken] = useState('stk_demo_mobile_token_456');

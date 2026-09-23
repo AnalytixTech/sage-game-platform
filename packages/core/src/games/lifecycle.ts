@@ -5,7 +5,7 @@ import {
   GameModule,
   GameResult,
   GameState,
-} from '@sagegame/types';
+} from '@sagegames/types';
 import { TypedEventEmitter } from '../events/emitter';
 
 export type LifecycleState = 'uninitialized' | 'initialized' | 'started' | 'paused' | 'completed' | 'destroyed';

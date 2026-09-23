@@ -1,4 +1,4 @@
-import { GameSession, GameSessionStatus } from '@sagegame/types';
+import { GameSession, GameSessionStatus } from '@sagegames/types';
 import { SageGameClient } from '../api/client';
 
 export interface SessionEngineOptions {

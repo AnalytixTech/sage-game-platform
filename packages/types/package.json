@@ -1,5 +1,5 @@
 {
-  "name": "@sagegame/types",
+  "name": "@sagegames/types",
   "version": "1.0.0",
   "description": "Core TypeScript definitions and contracts for SageGame Platform",
   "main": "dist/index.js",
@@ -8,7 +8,7 @@
     "build": "tsc"
   },
   "keywords": [
-    "sagegame",
+    "sagegames",
     "gaas",
     "types",
     "gaming"

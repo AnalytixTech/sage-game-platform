@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { SageGameClient } from '@sagegame/core';
-import { GameModule } from '@sagegame/types';
+import { SageGameClient } from '@sagegames/core';
+import { GameModule } from '@sagegames/types';
 
 export interface SageGameContextValue {
   client: SageGameClient;

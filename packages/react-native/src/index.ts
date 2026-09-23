@@ -1,8 +1,8 @@
 import React from 'react';
-import { Game as GameMetadata, GameCategory, GameEvent, GameResult } from '@sagegame/types';
-import { useGames } from '@sagegame/react';
+import { Game as GameMetadata, GameCategory, GameEvent, GameResult } from '@sagegames/types';
+import { useGames } from '@sagegames/react';
 
-// Re-export shared providers and hooks from @sagegame/react for identical API surface
+// Re-export shared providers and hooks from @sagegames/react for identical API surface
 export {
   SageGameProvider,
   useSageGameContext,
@@ -11,7 +11,7 @@ export {
   useGameSession,
   useGameState,
   useGameResult,
-} from '@sagegame/react';
+} from '@sagegames/react';
 
 export interface RNGameCatalogProps {
   onSelectGame?: (game: GameMetadata) => void;

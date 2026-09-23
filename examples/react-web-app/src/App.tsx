@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { Game, GameCatalog, SageGameProvider } from '@sagegame/react';
-import { QuizMasterGameModule } from '@sagegame/game-quiz-master';
-import { WordRushGameModule } from '@sagegame/game-word-rush';
-import { MemoryMatchGameModule } from '@sagegame/game-memory-match';
-import { WordSearchGameModule } from '@sagegame/game-word-search';
-import { SudokuGameModule } from '@sagegame/game-sudoku';
-import { Game as GameType, GameResult, WordSearchConfig } from '@sagegame/types';
+import { Game, GameCatalog, SageGameProvider } from '@sagegames/react';
+import { QuizMasterGameModule } from '@sagegames/game-quiz-master';
+import { WordRushGameModule } from '@sagegames/game-word-rush';
+import { MemoryMatchGameModule } from '@sagegames/game-memory-match';
+import { WordSearchGameModule } from '@sagegames/game-word-search';
+import { SudokuGameModule } from '@sagegames/game-sudoku';
+import { Game as GameType, GameResult, WordSearchConfig } from '@sagegames/types';
 
 const quizModule = new QuizMasterGameModule();
 const wordModule = new WordRushGameModule();

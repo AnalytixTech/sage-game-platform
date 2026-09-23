@@ -1,5 +1,5 @@
 import React from 'react';
-import { GameEvent, GameResult } from '@sagegame/types';
+import { GameEvent, GameResult } from '@sagegames/types';
 import { GameLauncher } from './GameLauncher';
 
 export interface GameProps {

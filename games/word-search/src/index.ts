@@ -7,7 +7,7 @@ import {
   WordSearchConfig,
   WordSearchEntry,
   WordSearchResult,
-} from '@sagegame/types';
+} from '@sagegames/types';
 
 export interface CellPosition {
   row: number;

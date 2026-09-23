@@ -5,7 +5,7 @@ import {
   GameResult,
   GameState,
   QuizGameResult,
-} from '@sagegame/types';
+} from '@sagegames/types';
 
 export interface QuizConfig {
   questionCount?: number;

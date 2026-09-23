@@ -1,4 +1,4 @@
-import { Game, GameCategory, Platform } from '@sagegame/types';
+import { Game, GameCategory, Platform } from '@sagegames/types';
 
 export class GameRegistry {
   private games: Map<string, Game> = new Map();

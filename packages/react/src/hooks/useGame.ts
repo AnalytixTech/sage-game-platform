@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Game } from '@sagegame/types';
+import { Game } from '@sagegames/types';
 import { useSageGameContext } from '../providers/SageGameProvider';
 
 export function useGame(gameId: string) {

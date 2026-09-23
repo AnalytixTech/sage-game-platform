@@ -5,7 +5,7 @@ import {
   GameResult,
   GameState,
   MemoryGameResult,
-} from '@sagegame/types';
+} from '@sagegames/types';
 
 export interface MemoryMatchConfig {
   pairCount?: number;

@@ -1,4 +1,4 @@
-import { GameEvent, GameEventType } from '@sagegame/types';
+import { GameEvent, GameEventType } from '@sagegames/types';
 
 export type EventCallback<T = GameEvent> = (event: T) => void;
 

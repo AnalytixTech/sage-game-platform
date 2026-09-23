@@ -5,7 +5,7 @@ import {
   GameResult,
   GameState,
   WordGameResult,
-} from '@sagegame/types';
+} from '@sagegames/types';
 
 export interface WordRushConfig {
   gridSize?: number;

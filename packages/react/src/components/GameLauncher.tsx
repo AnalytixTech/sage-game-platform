@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GameLifecycleManager } from '@sagegame/core';
-import { GameAction, GameEvent, GameModule, GameResult, GameState } from '@sagegame/types';
+import { GameLifecycleManager } from '@sagegames/core';
+import { GameAction, GameEvent, GameModule, GameResult, GameState } from '@sagegames/types';
 import { useSageGameContext } from '../providers/SageGameProvider';
 
 export interface GameLauncherProps {

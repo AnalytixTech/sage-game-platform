@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { GameSession } from '@sagegame/types';
+import { GameSession } from '@sagegames/types';
 import { useSageGameContext } from '../providers/SageGameProvider';
 
 export function useGameSession(sessionId?: string) {

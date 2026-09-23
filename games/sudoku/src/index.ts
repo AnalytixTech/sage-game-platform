@@ -7,7 +7,7 @@ import {
   SudokuConfig,
   SudokuResult,
   SudokuVariantId,
-} from '@sagegame/types';
+} from '@sagegames/types';
 
 export interface VariantConfig {
   id: SudokuVariantId;

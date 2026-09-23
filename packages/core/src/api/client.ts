@@ -6,7 +6,7 @@ import {
   Leaderboard,
   LeaderboardQuery,
   PlayerStats,
-} from '@sagegame/types';
+} from '@sagegames/types';
 
 export interface SageGameClientOptions {
   baseUrl?: string;

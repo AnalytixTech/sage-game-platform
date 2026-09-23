@@ -1,5 +1,5 @@
 {
-  "name": "@sagegame/api-service",
+  "name": "@sagegames/api-service",
   "version": "1.0.0",
   "description": "Platform REST API Backend Service for SageGame",
   "main": "dist/server.js",
@@ -8,7 +8,7 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@sagegame/types": "1.0.0",
+    "@sagegames/types": "1.0.0",
     "express": "^4.19.2"
   },
   "devDependencies": {

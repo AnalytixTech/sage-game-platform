@@ -9,7 +9,7 @@ import {
   Leaderboard,
   LeaderboardEntry,
   PlayerStats,
-} from '@sagegame/types';
+} from '@sagegames/types';
 
 const app = express();
 app.use(express.json());
