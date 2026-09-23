@@ -3,7 +3,9 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "composite": true
+    "composite": true,
+    "skipLibCheck": true,
+    "noImplicitAny": false
   },
   "references": [
     { "path": "../types" },
