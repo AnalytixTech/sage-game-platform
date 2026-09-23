@@ -1,0 +1,19 @@
+{
+  "name": "@sagegame/core",
+  "version": "1.0.0",
+  "description": "Core runtime SDK logic for SageGame Platform",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@sagegame/types": "1.0.0"
+  },
+  "keywords": [
+    "sagegame",
+    "gaas",
+    "core",
+    "sdk"
+  ]
+}

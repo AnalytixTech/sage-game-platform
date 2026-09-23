@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "types": ["node", "express", "react"],
+    "paths": {
+      "@sagegame/types": ["packages/types/src/index.ts"],
+      "@sagegame/core": ["packages/core/src/index.ts"],
+      "@sagegame/react": ["packages/react/src/index.ts"],
+      "@sagegame/react-native": ["packages/react-native/src/index.ts"],
+      "@sagegame/game-quiz-master": ["games/quiz-master/src/index.ts"],
+      "@sagegame/game-word-rush": ["games/word-rush/src/index.ts"],
+      "@sagegame/game-memory-match": ["games/memory-match/src/index.ts"],
+      "@sagegame/game-word-search": ["games/word-search/src/index.ts"],
+      "@sagegame/game-sudoku": ["games/sudoku/src/index.ts"]
+    }
+  },
+  "files": [],
+  "references": [
+    { "path": "./packages/types" },
+    { "path": "./packages/core" },
+    { "path": "./packages/react" },
+    { "path": "./packages/react-native" },
+    { "path": "./games/quiz-master" },
+    { "path": "./games/word-rush" },
+    { "path": "./games/memory-match" },
+    { "path": "./games/word-search" },
+    { "path": "./games/sudoku" },
+    { "path": "./services/api" }
+  ]
+}

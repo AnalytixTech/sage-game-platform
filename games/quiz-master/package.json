@@ -1,0 +1,13 @@
+{
+  "name": "@sagegame/game-quiz-master",
+  "version": "1.0.0",
+  "description": "Quiz Master Game Module for SageGame Platform",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@sagegame/types": "1.0.0"
+  }
+}

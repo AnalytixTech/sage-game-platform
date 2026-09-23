@@ -1,0 +1,15 @@
+{
+  "name": "@sagegame/example-react-web-app",
+  "version": "1.0.0",
+  "description": "Example React Web App integrating @sagegame/react SDK",
+  "main": "src/App.tsx",
+  "dependencies": {
+    "@sagegame/game-memory-match": "1.0.0",
+    "@sagegame/game-quiz-master": "1.0.0",
+    "@sagegame/game-word-rush": "1.0.0",
+    "@sagegame/react": "1.0.0",
+    "@sagegame/types": "1.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

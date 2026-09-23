@@ -1,0 +1,22 @@
+{
+  "name": "sage-game-platform-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SageGame - Type-safe Multi-Tenant Multi-Game Game-as-a-Service (GaaS) Platform Monorepo",
+  "workspaces": [
+    "packages/*",
+    "games/*",
+    "services/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "typescript": "^5.3.3"
+  }
+}

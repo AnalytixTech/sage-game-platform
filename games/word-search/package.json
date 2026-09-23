@@ -1,0 +1,13 @@
+{
+  "name": "@sagegame/game-word-search",
+  "version": "1.0.0",
+  "description": "Word Search Game Module for SageGame Platform with configurable categories and words",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@sagegame/types": "1.0.0"
+  }
+}
