@@ -1,5 +1,8 @@
 import { Pool, PoolClient } from 'pg';
 
+/** Tables the running code needs; if any is missing, a migration hasn't been applied. */
+export const REQUIRED_TABLES = ['games', 'game_sessions', 'quiz_banks', 'webhook_deliveries', 'matches', 'match_players'];
+
 /** Anything that can run a parameterised query and return its rows. */
 export interface Queryable {
   query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<R[]>;
@@ -20,18 +23,37 @@ export function createPgDb(connectionString: string, ssl: boolean): Db {
   // Platform tables live in their own schema (see supabase/migrations). This needs a session-mode
   // connection (Supabase session pooler on port 5432 or a direct connection), not the transaction
   // pooler on 6543, because the setting must persist for the life of the connection.
-  pool.on('connect', (client) => {
-    client.query('SET search_path TO sagegames, public').catch(() => undefined);
-  });
+  // Each new connection is set up before its first query (awaited, so the two never overlap).
+  const ready = new WeakSet<PoolClient>();
+  const acquire = async (): Promise<PoolClient> => {
+    const client = await pool.connect();
+    if (!ready.has(client)) {
+      try {
+        await client.query('SET search_path TO sagegames, public');
+        ready.add(client);
+      } catch (err) {
+        client.release(err as Error); // discard the connection
+        throw err;
+      }
+    }
+    return client;
+  };
 
-  const wrap = (client: Pool | PoolClient): Queryable => ({
+  const wrap = (client: PoolClient): Queryable => ({
     query: async <R>(text: string, params?: unknown[]) => (await client.query(text, params)).rows as R[],
   });
 
   return {
-    ...wrap(pool),
+    async query<R>(text: string, params?: unknown[]) {
+      const client = await acquire();
+      try {
+        return (await client.query(text, params)).rows as R[];
+      } finally {
+        client.release();
+      }
+    },
     async tx(fn) {
-      const client = await pool.connect();
+      const client = await acquire();
       try {
         await client.query('BEGIN');
         const result = await fn(wrap(client));

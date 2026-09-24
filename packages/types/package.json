@@ -2,6 +2,11 @@
   "name": "@sagegames/types",
   "version": "2.1.0",
   "description": "Core TypeScript definitions and contracts for SageGame Platform",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnalytixTech/sage-game-platform.git",
+    "directory": "packages/types"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -12,5 +17,8 @@
     "gaas",
     "types",
     "gaming"
+  ],
+  "files": [
+    "dist"
   ]
 }

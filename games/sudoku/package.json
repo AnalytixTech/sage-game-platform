@@ -2,6 +2,11 @@
   "name": "@sagegames/game-sudoku",
   "version": "2.1.0",
   "description": "Sudoku Game Module for SageGame Platform",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnalytixTech/sage-game-platform.git",
+    "directory": "games/sudoku"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

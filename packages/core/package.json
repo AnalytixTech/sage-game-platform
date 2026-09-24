@@ -2,6 +2,11 @@
   "name": "@sagegames/core",
   "version": "2.1.0",
   "description": "Core runtime SDK logic for SageGame Platform",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnalytixTech/sage-game-platform.git",
+    "directory": "packages/core"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -16,5 +21,8 @@
     "gaas",
     "core",
     "sdk"
+  ],
+  "files": [
+    "dist"
   ]
 }

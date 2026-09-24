@@ -1,10 +1,12 @@
 name: Publish NPM Packages
 
-# Publishes only when a version tag (e.g. v1.1.0) is pushed.
+# Publishes when a version tag (e.g. v2.1.0) is pushed, or on demand from the Actions tab
+# (Publish NPM Packages → Run workflow). Versions already on npm are skipped either way.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,6 +24,15 @@ jobs:
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Check the npm token is set
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::The NPM_TOKEN repository secret is missing (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install Monorepo Dependencies
         run: npm install --include=dev --legacy-peer-deps

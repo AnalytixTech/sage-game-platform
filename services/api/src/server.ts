@@ -3,7 +3,7 @@ import { createApp } from './app';
 import { createSupabaseVerifier } from './auth/portalAuth';
 import { syncCatalog } from './catalog';
 import { loadConfig } from './config';
-import { createPgDb, one } from './db/db';
+import { createPgDb, REQUIRED_TABLES } from './db/db';
 import { parseBootstrapKeys } from './http/auth';
 import { AppContext } from './http/context';
 import { createLogger, Logger } from './observability/logger';
@@ -31,9 +31,15 @@ async function main() {
   });
   const db = createPgDb(config.databaseUrl, config.databaseSsl);
 
-  const schema = await one<{ games: string | null }>(db, `SELECT to_regclass('sagegames.games')::text AS games`);
-  if (!schema?.games) {
-    throw new Error('Database schema is missing. Apply migrations with: npx supabase db push');
+  const missing = await db.query<{ name: string }>(
+    `SELECT name FROM unnest($1::text[]) AS name WHERE to_regclass('sagegames.' || name) IS NULL`,
+    [REQUIRED_TABLES]
+  );
+  if (missing.length) {
+    throw new Error(
+      `Database migrations are missing (no table ${missing.map((m) => m.name).join(', ')}). ` +
+        'Apply them with: npx supabase db push'
+    );
   }
 
   await syncCatalog(db);
