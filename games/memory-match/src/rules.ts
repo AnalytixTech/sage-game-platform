@@ -119,12 +119,13 @@ export const memoryMatchRules: GameRules<MemoryMatchConfig, MemoryMatchState, Me
       mismatch: true,
       moves,
       misses: state.misses + 1,
-      score: Math.max(0, state.score - (lapse ? MISS_PENALTY : 0)),
+      score: state.score - (lapse ? MISS_PENALTY : 0),
     };
   },
 
   isOver: (state) => state.matchedPairs === state.pairCount,
-  score: (state) => state.score,
+  // The running total may dip below zero; only the final score is floored, so early mistakes still count.
+  score: (state) => Math.max(0, state.score),
   progress: (state) => state.matchedPairs / state.pairCount,
 
   result: (state) => ({

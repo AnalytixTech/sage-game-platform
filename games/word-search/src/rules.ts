@@ -249,7 +249,7 @@ export const wordSearchRules: GameRules<WordSearchRulesConfig, WordSearchState, 
 
   reduce(state, action, tMs) {
     const cells = selectionCells(state.size, action.payload.from, action.payload.to);
-    const invalid = { ...state, invalidSelections: state.invalidSelections + 1, score: Math.max(0, state.score - 10) };
+    const invalid = { ...state, invalidSelections: state.invalidSelections + 1, score: state.score - 10 };
     if (!cells || cells.length < 2) return invalid;
 
     const letters = cells.map((idx) => state.grid[Math.floor(idx / state.size)][idx % state.size]).join('');
@@ -274,7 +274,8 @@ export const wordSearchRules: GameRules<WordSearchRulesConfig, WordSearchState, 
   },
 
   isOver: (state) => state.foundCount === state.words.length,
-  score: (state) => state.score,
+  // The running total may dip below zero; only the final score is floored.
+  score: (state) => Math.max(0, state.score),
   progress: (state) => (state.words.length === 0 ? 1 : state.foundCount / state.words.length),
 
   result: (state) => ({

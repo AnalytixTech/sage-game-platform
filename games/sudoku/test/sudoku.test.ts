@@ -96,7 +96,7 @@ describe('sudoku play', () => {
     runtime.dispatch('HINT', { cell: state.givens.indexOf(true) }); // a given: falls back to the open cell
     const after = runtime.getSnapshot();
     expect(after.state.hintsUsed).toBe(1);
-    expect(after.score).toBe(Math.max(0, before - 100) + 500);
+    expect(after.score).toBe(Math.max(0, before - 100 + 500));
     expect(after.over).toBe(true);
 
     // Nothing left to hint: free, and ignored because the game is over.

@@ -162,7 +162,7 @@ export const sudokuRules: GameRules<SudokuRulesConfig, SudokuState, SudokuAction
           }
         } else {
           next.mistakes = state.mistakes + 1;
-          next.score = Math.max(0, state.score - MISTAKE_PENALTY);
+          next.score = state.score - MISTAKE_PENALTY;
         }
         return withCompletion(next, tMs);
       }
@@ -207,7 +207,7 @@ export const sudokuRules: GameRules<SudokuRulesConfig, SudokuState, SudokuAction
             notes,
             credited,
             hintsUsed: state.hintsUsed + 1,
-            score: Math.max(0, state.score - HINT_PENALTY),
+            score: state.score - HINT_PENALTY,
           },
           tMs
         );
@@ -216,7 +216,8 @@ export const sudokuRules: GameRules<SudokuRulesConfig, SudokuState, SudokuAction
   },
 
   isOver: (state) => state.completed || state.timedOut,
-  score: (state) => state.score,
+  // The running total may dip below zero; only the final score is floored, so early mistakes still count.
+  score: (state) => Math.max(0, state.score),
 
   progress(state) {
     let open = 0;
