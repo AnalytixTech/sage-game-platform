@@ -1,6 +1,7 @@
 {
   "name": "@sagegames/api-service",
   "version": "1.0.0",
+  "private": true,
   "description": "Platform REST API Backend Service for SageGame",
   "main": "dist/server.js",
   "scripts": {

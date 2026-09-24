@@ -4,7 +4,11 @@ const app = express();
 app.use(express.json());
 
 const SAGEGAME_API_URL = process.env.SAGEGAME_API_URL || 'http://localhost:4000';
-const HOST_SECRET_KEY = process.env.HOST_SECRET_KEY || 'sec_campus_secret_123';
+// The host secret must only ever live on the host's server, never in a web or mobile app.
+const HOST_SECRET_KEY = process.env.HOST_SECRET_KEY;
+if (!HOST_SECRET_KEY) {
+  throw new Error('HOST_SECRET_KEY environment variable is required');
+}
 
 /**
  * Host Application Endpoint called by React or Mobile App

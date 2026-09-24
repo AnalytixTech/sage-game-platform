@@ -1,6 +1,7 @@
 {
   "name": "@sagegames/example-react-native-app",
   "version": "1.0.0",
+  "private": true,
   "description": "Example React Native / Expo App integrating @sagegames/react-native SDK",
   "main": "App.tsx",
   "dependencies": {

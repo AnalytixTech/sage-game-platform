@@ -1,6 +1,7 @@
 {
   "name": "@sagegames/example-host-backend",
   "version": "1.0.0",
+  "private": true,
   "description": "Example Host Backend integration requesting session tokens from SageGame API",
   "main": "server.js",
   "scripts": {

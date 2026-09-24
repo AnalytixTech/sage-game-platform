@@ -1,1 +1,0 @@
-{"version":3,"file":"useGames.d.ts","sourceRoot":"","sources":["useGames.ts"],"names":[],"mappings":"AACA,OAAO,EAAQ,YAAY,EAAE,MAAM,iBAAiB,CAAC;AAGrD,MAAM,WAAW,eAAe;IAC9B,QAAQ,CAAC,EAAE,YAAY,CAAC;IACxB,MAAM,CAAC,EAAE,MAAM,CAAC;IAChB,SAAS,CAAC,EAAE,OAAO,CAAC;CACrB;AAED,wBAAgB,QAAQ,CAAC,OAAO,GAAE,eAAoB;;;;;EA6BrD"}
