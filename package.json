@@ -20,6 +20,8 @@
     "db:new": "supabase migration new",
     "playground": "vite --config tools/playground/vite.config.ts",
     "test:ui": "node tools/playground/play.mjs .ui-shots/native && node tools/playground/play.mjs .ui-shots/web sdk=web",
+    "battle-server": "node tools/playground/battle-server.mjs",
+    "test:battle": "node tools/playground/battle.mjs .ui-shots/battle && node tools/playground/battle.mjs .ui-shots/battle-web sdk=web",
     "typecheck:examples": "tsc -p tools/playground/tsconfig.examples.json"
   },
   "dependencies": {

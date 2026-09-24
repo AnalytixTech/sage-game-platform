@@ -1,15 +1,14 @@
 import React from 'react';
-import { Pressable, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import type { SudokuState } from '@sagegames/game-sudoku';
 import { GameViewProps, SudokuCellInfo, useSudoku } from '@sagegames/react-headless';
-import { Button, font, Stat } from '../ui/primitives';
+import { Button, font, Stat, useBoardWidth } from '../ui/primitives';
 
 export function SudokuView({ state, dispatch, theme, labels, paused, ended }: GameViewProps<SudokuState>) {
   const sudoku = useSudoku(state, dispatch);
-  const { width } = useWindowDimensions();
+  const { width: boardWidth, onLayout } = useBoardWidth(460, theme.spacing.lg);
   const c = theme.colors;
   const n = sudoku.size;
-  const boardWidth = Math.min(width - theme.spacing.lg * 2, 460);
   const cellSize = Math.floor(boardWidth / n);
   const noteColumns = Math.ceil(Math.sqrt(n));
 
@@ -78,7 +77,7 @@ export function SudokuView({ state, dispatch, theme, labels, paused, ended }: Ga
   const padButton = Math.floor((boardWidth - (padColumns - 1) * 6) / padColumns);
 
   return (
-    <View style={{ gap: theme.spacing.md, alignItems: 'center' }}>
+    <View onLayout={onLayout} style={{ gap: theme.spacing.md, alignItems: 'center' }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-around', alignSelf: 'stretch' }}>
         <Stat label={labels.mistakes} value={state.mistakes} align="center" />
         <Stat label={labels.hints} value={state.hintsUsed} align="center" />

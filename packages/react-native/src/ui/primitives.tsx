@@ -1,6 +1,22 @@
-import React, { ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleProp, Text, TextStyle, View, ViewStyle } from 'react-native';
+import React, { ReactNode, useCallback, useState } from 'react';
+import { ActivityIndicator, LayoutChangeEvent, Pressable, StyleProp, Text, TextStyle, useWindowDimensions, View, ViewStyle } from 'react-native';
 import { SageTheme, useSage } from '@sagegames/react-headless';
+
+/**
+ * Width available to a game board: the measured width of the view it's laid out in (so it fits
+ * modals, sheets and split screens), estimated from the window until the first layout.
+ * Put `onLayout` on the view that fills the space.
+ */
+export function useBoardWidth(max: number, padding: number) {
+  const window = useWindowDimensions();
+  const [measured, setMeasured] = useState<number | null>(null);
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    const w = Math.floor(e.nativeEvent.layout.width);
+    setMeasured((prev) => (prev === w ? prev : w));
+  }, []);
+  const available = measured ?? window.width - padding * 2;
+  return { width: Math.max(0, Math.min(available, max)), onLayout };
+}
 
 /** Text style for a theme font, falling back to fontWeight when no custom family is set. */
 export function font(theme: SageTheme, weight: 'regular' | 'medium' | 'bold'): TextStyle {

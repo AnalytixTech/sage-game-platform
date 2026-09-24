@@ -54,6 +54,20 @@ jobs:
       - name: Play every game
         run: npm run test:ui
 
+      # Two players race a battle through the real API (in-memory Postgres) over WebSockets.
+      - name: Start battle server
+        run: npm run battle-server > battle-server.log 2>&1 &
+
+      - name: Wait for battle server
+        run: npx wait-on tcp:127.0.0.1:4100 --timeout 60000
+
+      - name: Play a battle
+        run: npm run test:battle
+
+      - name: Server logs
+        if: failure()
+        run: cat playground.log battle-server.log
+
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4

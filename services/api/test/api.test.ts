@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GameRuntime } from '@sagegames/core';
 import { memoryMatchRules, MemoryMatchState } from '@sagegames/game-memory-match';
 import { quizMasterRules } from '@sagegames/game-quiz-master';
@@ -72,6 +72,9 @@ describe('SageGames API', () => {
   let env: TestEnv;
   beforeEach(async () => {
     env = await createTestEnv();
+  });
+  afterEach(async () => {
+    await env.db.close(); // each test gets its own in-memory Postgres
   });
 
   describe('developer portal', () => {

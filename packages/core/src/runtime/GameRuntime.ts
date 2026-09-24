@@ -8,6 +8,8 @@ export interface GameRuntimeOptions<TConfig, TState, TAction extends RulesAction
   config: TConfig;
   /** Clock source; defaults to Date.now. Injected in tests. */
   now?: () => number;
+  /** Called with every recorded action (used to stream moves to a live match). */
+  onAction?: (action: ActionTuple) => void;
 }
 
 export interface RuntimeSnapshot<TState> {
@@ -49,10 +51,25 @@ export class GameRuntime<TConfig, TState, TAction extends RulesAction, TResult> 
     return this.options.rules;
   }
 
-  public start(): void {
+  /** Start the clock now, or at a given time on this runtime's clock (e.g. a synced race start). */
+  public start(at?: number): void {
     if (this.startedAt !== null) return;
-    this.startedAt = this.now();
+    this.startedAt = at ?? this.now();
     this.emit();
+  }
+
+  /**
+   * Re-apply moves the server already has (after reconnecting to a live match). Call after
+   * start() and before any new moves.
+   */
+  public restore(actions: ActionTuple[]): void {
+    for (const [t, type, payload] of actions) {
+      if (this.play.apply(t, type, payload) === 'applied') {
+        this.actions.push(payload === undefined ? [t, type] : [t, type, payload]);
+      }
+    }
+    if (this.play.over) this.finish(this.overReason());
+    else this.emit();
   }
 
   /** Apply a player action. Only actions the engine accepts are recorded. */
@@ -62,7 +79,9 @@ export class GameRuntime<TConfig, TState, TAction extends RulesAction, TResult> 
     const t = this.clock();
     const outcome = this.play.apply(t, type, payload);
     if (outcome === 'applied') {
-      this.actions.push(payload === undefined ? [t, type] : [t, type, payload]);
+      const action: ActionTuple = payload === undefined ? [t, type] : [t, type, payload];
+      this.actions.push(action);
+      this.options.onAction?.(action);
     }
 
     if (this.play.over) {

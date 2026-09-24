@@ -3,12 +3,15 @@ import { Queryable } from '../db/db';
 
 export type WebhookEvent = 'session.completed' | 'match.finished';
 
-/** Queue an event for the tenant (no-op when the tenant has no webhook URL). Call inside the business transaction. */
-export async function enqueueWebhook(q: Queryable, tenantId: string, event: WebhookEvent, data: unknown): Promise<void> {
+/**
+ * Queue an event for the tenant (no-op when the tenant has no webhook URL). Call inside the business transaction.
+ * `now` is the app clock (not the database's), so it's due on the same clock the dispatcher checks.
+ */
+export async function enqueueWebhook(q: Queryable, tenantId: string, event: WebhookEvent, data: unknown, now: Date): Promise<void> {
   await q.query(
-    `INSERT INTO webhook_deliveries (tenant_id, event_type, payload)
-     SELECT id, $2, $3 FROM tenants WHERE id = $1 AND webhook_url IS NOT NULL`,
-    [tenantId, event, JSON.stringify(data)]
+    `INSERT INTO webhook_deliveries (tenant_id, event_type, payload, created_at, next_attempt_at)
+     SELECT id, $2, $3, $4, $4 FROM tenants WHERE id = $1 AND webhook_url IS NOT NULL`,
+    [tenantId, event, JSON.stringify(data), now]
   );
 }
 

@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import { BootstrapKey, createAuth } from './http/auth';
 import { AppContext } from './http/context';
 import { errorMiddleware, HttpError } from './http/errors';
+import { MatchHub, RealtimeOptions, DEFAULT_REALTIME } from './realtime/MatchRoom';
+import { matchRoutes } from './routes/matches';
 import { portalRoutes } from './routes/portal';
 import { v1Routes } from './routes/v1';
 import { v2Routes } from './routes/v2';
@@ -13,6 +15,8 @@ export interface AppOptions {
   bootstrapKeys?: BootstrapKey[];
   /** Built developer portal (services/portal/dist). Served at /portal when present. */
   portalDir?: string;
+  /** Battle timings (tests shorten them). */
+  realtime?: Partial<RealtimeOptions>;
 }
 
 /** Game API: bearer tokens only (no cookies), so any origin may call it. */
@@ -28,6 +32,9 @@ function cors(req: Request, res: Response, next: NextFunction) {
 export function createApp(ctx: AppContext, options: AppOptions = {}) {
   const app = express();
   const auth = createAuth(ctx, options.bootstrapKeys ?? []);
+  const hub = new MatchHub(ctx.db, () => ctx.now().getTime(), ctx.log, { ...DEFAULT_REALTIME, ...options.realtime });
+  // server.ts attaches the WebSocket endpoint to the same hub.
+  app.locals.matchHub = hub;
 
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
@@ -58,6 +65,7 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
   );
 
   app.use('/v1', cors, v1Routes(ctx, auth));
+  app.use('/v2/matches', cors, matchRoutes(ctx, auth, hub));
   app.use('/v2', cors, v2Routes(ctx, auth));
   app.use('/portal/api', portalRoutes(ctx, auth));
 
