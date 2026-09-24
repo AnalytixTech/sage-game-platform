@@ -1,13 +1,12 @@
 import { Router } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { z } from 'zod';
-import { quizMasterRules } from '@sagegames/game-quiz-master';
-import { ConfigError } from '@sagegames/engine';
 import { one } from '../db/db';
 import { createAuth, SessionRow } from '../http/auth';
 import { AppContext, HostAuth } from '../http/context';
 import { asyncHandler, HttpError, parse } from '../http/errors';
 import { leaderboard, playerStats } from '../services/leaderboards';
+import { deleteQuizBank, getQuizBank, listQuizBanks, quizBankBody, saveQuizBank } from '../services/quizBanks';
 import { catalogHandlers } from './catalogHandlers';
 import { COMPLETE_GRACE_MS, completeSession, createSession, loadCompletion, playPayload, startSession } from '../services/sessions';
 
@@ -179,17 +178,14 @@ export function v2Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
 
   // ---- Quiz banks (host) ----
 
+  const tenantOf = (res: { locals: Record<string, unknown> }) => (res.locals.host as HostAuth).tenantId;
+
   router.get(
     '/quiz-banks',
     hostLimit,
     auth.requireHost,
     asyncHandler(async (_req, res) => {
-      const rows = await ctx.db.query<{ bank_id: string; name: string; count: number; updated_at: Date }>(
-        `SELECT bank_id, name, jsonb_array_length(questions)::int AS count, updated_at
-           FROM quiz_banks WHERE tenant_id = $1 ORDER BY bank_id`,
-        [(res.locals.host as HostAuth).tenantId]
-      );
-      res.json(rows.map((r) => ({ bankId: r.bank_id, name: r.name, questionCount: r.count, updatedAt: new Date(r.updated_at).toISOString() })));
+      res.json(await listQuizBanks(ctx.db, tenantOf(res)));
     })
   );
 
@@ -198,13 +194,7 @@ export function v2Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
     hostLimit,
     auth.requireHost,
     asyncHandler(async (req, res) => {
-      const row = await one<{ bank_id: string; name: string; questions: unknown }>(
-        ctx.db,
-        'SELECT bank_id, name, questions FROM quiz_banks WHERE tenant_id = $1 AND bank_id = $2',
-        [(res.locals.host as HostAuth).tenantId, req.params.bankId]
-      );
-      if (!row) throw new HttpError(404, 'Quiz bank not found', 'quiz_bank_not_found');
-      res.json({ bankId: row.bank_id, name: row.name, questions: row.questions });
+      res.json(await getQuizBank(ctx.db, tenantOf(res), req.params.bankId));
     })
   );
 
@@ -213,21 +203,8 @@ export function v2Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
     hostLimit,
     auth.requireHost,
     asyncHandler(async (req, res) => {
-      const bankId = parse(z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/), req.params.bankId);
-      const body = parse(z.object({ name: z.string().max(120).optional(), questions: z.array(z.unknown()).min(1) }), req.body);
-      let questions: unknown;
-      try {
-        questions = quizMasterRules.parseConfig({ questions: body.questions }).questions;
-      } catch (err) {
-        if (err instanceof ConfigError) throw new HttpError(400, err.message, 'invalid_questions');
-        throw err;
-      }
-      await ctx.db.query(
-        `INSERT INTO quiz_banks (tenant_id, bank_id, name, questions, updated_at) VALUES ($1, $2, $3, $4, now())
-         ON CONFLICT (tenant_id, bank_id) DO UPDATE SET name = EXCLUDED.name, questions = EXCLUDED.questions, updated_at = now()`,
-        [(res.locals.host as HostAuth).tenantId, bankId, body.name ?? '', JSON.stringify(questions)]
-      );
-      res.json({ bankId, name: body.name ?? '', questionCount: (questions as unknown[]).length });
+      const body = parse(quizBankBody, req.body);
+      res.json(await saveQuizBank(ctx.db, tenantOf(res), req.params.bankId, body, ctx.now()));
     })
   );
 
@@ -236,10 +213,7 @@ export function v2Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
     hostLimit,
     auth.requireHost,
     asyncHandler(async (req, res) => {
-      await ctx.db.query('DELETE FROM quiz_banks WHERE tenant_id = $1 AND bank_id = $2', [
-        (res.locals.host as HostAuth).tenantId,
-        req.params.bankId,
-      ]);
+      await deleteQuizBank(ctx.db, tenantOf(res), req.params.bankId);
       res.status(204).end();
     })
   );

@@ -7,6 +7,7 @@ import {
   WelcomeMessage,
 } from '@sagegames/types';
 import { GameRuntime } from '../runtime/GameRuntime';
+import { PlayableRuntime, RemoteRuntime } from '../runtime/RemoteRuntime';
 
 export type MatchPhase =
   | 'connecting'
@@ -36,8 +37,8 @@ export interface MatchState {
   /** Your player id. */
   you: string | null;
   rules: AnyGameRules | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  runtime: GameRuntime<any, any, any, any> | null;
+  /** Local play, or (games with hidden information) the server's view of your game. */
+  runtime: PlayableRuntime | null;
   /** Local time (ms) the race starts, for the countdown. */
   startsAtLocal: number | null;
   standings: MatchStanding[] | null;
@@ -98,6 +99,10 @@ export class MatchController {
   private socket: WebSocketLike | null = null;
   private seat: MatchSeat | null = null;
   private play: WelcomeMessage['play'] | null = null;
+  /** Hidden-information games: the latest view of your game from the server. */
+  private view: { state: unknown; t: number } | null = null;
+  /** Server time the race started, once it has. */
+  private raceStartAt: number | null = null;
   /** Server clock minus local clock, from the best (lowest round-trip) ping. */
   private offset = 0;
   private bestRtt = Infinity;
@@ -241,6 +246,13 @@ export class MatchController {
         return this.beginRace(msg.startAt);
       case 'progress':
         return this.onProgress(msg.players);
+      case 'state': {
+        this.view = { state: msg.state, t: msg.t };
+        const runtime = this.state.runtime;
+        if (runtime instanceof RemoteRuntime) return runtime.receive(msg.state, msg.t);
+        if (!runtime && this.raceStartAt !== null) this.beginRace(this.raceStartAt);
+        return;
+      }
       case 'finished':
         this.state.runtime?.finish('completed');
         this.set({ phase: 'finished', standings: msg.standings });
@@ -270,6 +282,7 @@ export class MatchController {
     this.attempt = 0;
     this.syncClock(msg.serverNow);
     this.play = msg.play;
+    this.view = msg.state !== undefined ? { state: msg.state, t: 0 } : null;
     const rules = this.options.resolveRules(msg.play.gameId);
     if (!rules) return this.fail({ message: `This app cannot render game ${msg.play.gameId}`, code: 'game_not_supported', retryable: false });
     if (rules.rulesVersion !== msg.play.rulesVersion) {
@@ -299,18 +312,41 @@ export class MatchController {
     this.startTimer = setTimeout(() => this.beginRace(startAt), Math.max(0, startsAtLocal - this.now()));
   }
 
+  private sendAction(t: number, type: string, payload?: unknown) {
+    this.send({ type: 'action', seq: ++this.seq, t, a: payload === undefined ? [type] : [type, payload] });
+  }
+
   private beginRace(startAt: number, restore?: WelcomeMessage['actions']) {
     if (this.state.runtime || !this.state.rules || !this.play) return;
-    const runtime = new GameRuntime({
-      rules: this.state.rules,
-      seed: this.play.seed,
-      config: this.play.config,
-      now: this.now,
-      onAction: ([t, type, payload]) =>
-        this.send({ type: 'action', seq: ++this.seq, t, a: payload === undefined ? [type] : [type, payload] }),
-    });
-    runtime.start(startAt - this.offset);
-    if (restore?.length) runtime.restore(restore);
+    this.raceStartAt = startAt;
+    const rules = this.state.rules;
+    let runtime: PlayableRuntime;
+
+    if (this.play.hidden) {
+      // The board appears with the server's first view of it (sent as the race starts).
+      if (!this.view) return this.set({ phase: 'playing', startsAtLocal: startAt - this.offset });
+      const remote = new RemoteRuntime({
+        rules,
+        state: this.view.state,
+        startedAt: startAt - this.offset,
+        now: this.now,
+        send: (t, type, payload) => this.sendAction(t, type, payload),
+      });
+      remote.receive(this.view.state, this.view.t);
+      runtime = remote;
+    } else {
+      const local = new GameRuntime({
+        rules,
+        seed: this.play.seed!,
+        config: this.play.config ?? {},
+        now: this.now,
+        onAction: ([t, type, payload]) => this.sendAction(t, type, payload),
+      });
+      local.start(startAt - this.offset);
+      if (restore?.length) local.restore(restore);
+      runtime = local;
+    }
+
     runtime.subscribe(() => {
       if (runtime.getSnapshot().ended && this.state.phase === 'playing') this.set({ phase: 'waiting' });
     });

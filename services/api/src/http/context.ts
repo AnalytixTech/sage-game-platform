@@ -1,6 +1,7 @@
 import { AppConfig } from '../config';
 import { Db } from '../db/db';
 import { PortalTokenVerifier } from '../auth/portalAuth';
+import { Logger } from '../observability/logger';
 
 export interface AppContext {
   db: Db;
@@ -8,7 +9,8 @@ export interface AppContext {
   verifyPortalToken: PortalTokenVerifier;
   /** Injectable clock for tests. */
   now: () => Date;
-  log: (message: string, extra?: unknown) => void;
+  /** Structured, redacting logger; error-level entries with `err` also go to the error reporter. */
+  logger: Logger;
 }
 
 export interface HostAuth {

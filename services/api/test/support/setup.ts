@@ -10,6 +10,7 @@ import { syncCatalog } from '../../src/catalog';
 import { AppConfig, testConfig } from '../../src/config';
 import { Db, Queryable } from '../../src/db/db';
 import { BootstrapKey, parseBootstrapKeys } from '../../src/http/auth';
+import { createLogger } from '../../src/observability/logger';
 import { AppContext } from '../../src/http/context';
 import { ensureBootstrapTenants } from '../../src/services/tenants';
 
@@ -58,7 +59,7 @@ export interface TestEnv {
   /** Create a Supabase-style user and return an access token for the portal. */
   signIn: (email?: string) => Promise<{ userId: string; token: string }>;
   bootstrapKey: string;
-  logs: unknown[];
+  logs: Record<string, unknown>[];
 }
 
 export const BOOTSTRAP_KEY = 'sk_bootstrap_campus_key_0123456789';
@@ -67,7 +68,7 @@ export async function createTestEnv(configOverrides: Partial<AppConfig> = {}): P
   const db = await createTestDb();
   const config = testConfig(configOverrides);
   const clock = testClock();
-  const logs: unknown[] = [];
+  const logs: Record<string, unknown>[] = [];
   await syncCatalog(db);
 
   const bootstrapKeys: BootstrapKey[] = parseBootstrapKeys(`tenant_campus_app:${BOOTSTRAP_KEY}`);
@@ -78,7 +79,8 @@ export async function createTestEnv(configOverrides: Partial<AppConfig> = {}): P
     config,
     verifyPortalToken: createSupabaseVerifier(config),
     now: clock.now,
-    log: (message, extra) => logs.push({ message, extra }),
+    // Captured (as parsed JSON entries) so tests can check what gets logged.
+    logger: createLogger({ level: 'debug', format: 'json', write: (line) => logs.push(JSON.parse(line)) }),
   };
   const app = createApp(ctx, { bootstrapKeys });
 

@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { BootstrapKey, createAuth } from './http/auth';
 import { AppContext } from './http/context';
 import { errorMiddleware, HttpError } from './http/errors';
+import { requestLog } from './observability/requestLog';
 import { MatchHub, RealtimeOptions, DEFAULT_REALTIME } from './realtime/MatchRoom';
 import { matchRoutes } from './routes/matches';
 import { portalRoutes } from './routes/portal';
@@ -32,7 +33,10 @@ function cors(req: Request, res: Response, next: NextFunction) {
 export function createApp(ctx: AppContext, options: AppOptions = {}) {
   const app = express();
   const auth = createAuth(ctx, options.bootstrapKeys ?? []);
-  const hub = new MatchHub(ctx.db, () => ctx.now().getTime(), ctx.log, { ...DEFAULT_REALTIME, ...options.realtime });
+  const hub = new MatchHub(ctx.db, () => ctx.now().getTime(), ctx.logger.child({ component: 'matches' }), {
+    ...DEFAULT_REALTIME,
+    ...options.realtime,
+  });
   // server.ts attaches the WebSocket endpoint to the same hub.
   app.locals.matchHub = hub;
 
@@ -52,6 +56,7 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     })
   );
+  app.use(requestLog(ctx.logger.child({ component: 'http' })));
   app.use(express.json({ limit: '256kb' }));
 
   app.get(
@@ -78,6 +83,6 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
   app.get('/', (_req, res) => res.redirect('/portal/'));
 
   app.use((_req, _res, next) => next(new HttpError(404, 'Not found', 'not_found')));
-  app.use(errorMiddleware((err) => ctx.log('Unhandled error', err)));
+  app.use(errorMiddleware(ctx.logger));
   return app;
 }

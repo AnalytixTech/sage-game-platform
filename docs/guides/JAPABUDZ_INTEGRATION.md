@@ -141,6 +141,8 @@ import gameRoutes from './games.routes';
 router.use('/games', gameRoutes);
 ```
 
+**Japa quiz questions.** To ask players your own questions (visas, relocation, study abroad), open the portal's **Quiz banks** tab, create a bank with id `japa`, and paste the questions in from a spreadsheet. Then add `game_quiz_001: { bankId: 'japa', questionCount: 10 }` to `GAME_CONFIG`. In battles the answers stay on the server until each question is answered, so they can't be read out of the app.
+
 > The platform checks the game config (for example, a Word Search word longer than 15 letters is reported back), so a bad config fails loudly with `400 invalid_config` instead of producing a broken game.
 
 ## 3. japabudz-server: receive verified results

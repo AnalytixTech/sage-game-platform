@@ -11,6 +11,7 @@ import {
 } from '@sagegames/types';
 import { isNonNegativeInt, isRecord, Play } from '@sagegames/engine';
 import { rulesFor } from '../catalog';
+import { Logger } from '../observability/logger';
 import { Db } from '../db/db';
 import {
   FinalPlayer,
@@ -57,13 +58,15 @@ interface Slot {
   finishedMs: number | null;
   completed: boolean;
   graceTimer: ReturnType<typeof setTimeout> | null;
+  /** Hidden-information games: the last view sent, to skip unchanged ones. */
+  lastView: string;
 }
 
 interface RoomDeps {
   db: Db;
   now: () => number;
   options: RealtimeOptions;
-  log: (message: string, extra?: unknown) => void;
+  logger: Logger;
   onDisposed: (matchId: string) => void;
 }
 
@@ -143,6 +146,7 @@ export class MatchRoom {
       finishedMs: p.finished_ms,
       completed: false,
       graceTimer: null,
+      lastView: '',
     });
   }
 
@@ -193,19 +197,20 @@ export class MatchRoom {
       slot.graceTimer = null;
     }
 
+    const base = { gameId: this.match.game_id, rulesVersion: this.match.rules_version };
+    // Hidden-information games never reveal the seed or config (a quiz config can hold the answers).
+    const hidden = !!this.rules.view;
+    const view = hidden && slot.play ? this.rules.view!(slot.play.state) : undefined;
     socket.send({
       type: 'welcome',
       you: sessionId,
       match: this.view(),
-      play: {
-        gameId: this.match.game_id,
-        rulesVersion: this.match.rules_version,
-        seed: this.match.seed,
-        config: this.match.resolved_config,
-      },
-      actions: slot.actions,
+      play: hidden ? { ...base, hidden } : { ...base, hidden, seed: this.match.seed, config: this.match.resolved_config },
+      actions: hidden ? [] : slot.actions,
+      ...(view !== undefined ? { state: view } : {}),
       serverNow: this.deps.now(),
     });
+    if (view !== undefined) slot.lastView = JSON.stringify(view);
     if (this.status === 'finished' && this.standings) socket.send({ type: 'finished', standings: this.standings });
     this.broadcastMatch();
   }
@@ -295,6 +300,7 @@ export class MatchRoom {
     this.persistMatch(new Date(this.startAt!));
     this.broadcast({ type: 'started', startAt: this.startAt!, serverNow: this.deps.now() });
     this.broadcastMatch();
+    for (const slot of this.participants()) this.sendView(slot, 0);
     this.ticker = setInterval(() => this.tick(), this.deps.options.tickMs);
     if (!this.participants().some((s) => s.status === 'playing')) void this.finalize();
   }
@@ -309,6 +315,7 @@ export class MatchRoom {
     for (const slot of this.slots.values()) {
       if (slot.status !== 'playing' || !slot.play) continue;
       slot.play.advanceTo(t);
+      this.sendView(slot, t); // e.g. a quiz question timed out
       if (slot.play.over) this.finishSlot(slot, t, 'finished');
     }
     this.broadcastProgress();
@@ -341,6 +348,7 @@ export class MatchRoom {
     if (outcome === 'invalid' || outcome === 'bad_time') return socket.send({ type: 'reject', seq, code: outcome });
     if (outcome === 'applied') slot.actions.push(a.length > 1 ? [tEff, a[0], a[1]] : [tEff, a[0]]);
     socket.send({ type: 'ack', seq, t: tEff });
+    this.sendView(slot, tEff);
 
     if (slot.play.over) this.finishSlot(slot, tEff, 'finished');
     this.broadcastProgress();
@@ -420,7 +428,7 @@ export class MatchRoom {
     try {
       await finalizeMatch(this.deps.db, this.match.id, standings, finals, t, new Date(this.deps.now()));
     } catch (err) {
-      this.deps.log('match finalize failed', err);
+      this.deps.logger.error('match results could not be saved', { err, matchId: this.match.id });
     }
     this.status = 'finished';
     this.standings = standings;
@@ -438,6 +446,16 @@ export class MatchRoom {
   private progressOf(s: Slot): number {
     if (!s.play) return 0;
     return s.completed ? 1 : this.rules.progress(s.play.state);
+  }
+
+  /** Hidden-information games: send the player their view of the game if it changed. */
+  private sendView(slot: Slot, t: number) {
+    if (!this.rules.view || !slot.play) return;
+    const state = this.rules.view(slot.play.state);
+    const key = JSON.stringify(state);
+    if (key === slot.lastView) return;
+    slot.lastView = key;
+    slot.socket?.send({ type: 'state', state, t });
   }
 
   private broadcast(message: ServerMessage) {
@@ -464,11 +482,11 @@ export class MatchRoom {
   }
 
   private persistMatch(startedAt?: Date) {
-    saveMatchStatus(this.deps.db, this.match.id, this.status, startedAt).catch((err) => this.deps.log('match save failed', err));
+    saveMatchStatus(this.deps.db, this.match.id, this.status, startedAt).catch((err) => this.deps.logger.error('match status could not be saved', { err, matchId: this.match.id }));
   }
 
   private persistPlayer(slot: Slot) {
-    savePlayerStatus(this.deps.db, this.match.id, slot.sessionId, slot.status).catch((err) => this.deps.log('player save failed', err));
+    savePlayerStatus(this.deps.db, this.match.id, slot.sessionId, slot.status).catch((err) => this.deps.logger.error('player status could not be saved', { err, matchId: this.match.id }));
   }
 
   private scheduleDispose() {
@@ -496,7 +514,7 @@ export class MatchHub {
   constructor(
     private readonly db: Db,
     private readonly now: () => number,
-    private readonly log: (message: string, extra?: unknown) => void,
+    private readonly logger: Logger,
     private readonly options: RealtimeOptions = DEFAULT_REALTIME
   ) {}
 
@@ -525,7 +543,7 @@ export class MatchHub {
       db: this.db,
       now: this.now,
       options: this.options,
-      log: this.log,
+      logger: this.logger,
       onDisposed: (id) => this.rooms.delete(id),
     });
   }

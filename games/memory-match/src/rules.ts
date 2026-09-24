@@ -142,4 +142,11 @@ export const memoryMatchRules: GameRules<MemoryMatchConfig, MemoryMatchState, Me
   },
 
   race: { ranking: 'time_then_score' },
+
+  // Only matched and currently revealed cards show their face.
+  view: (state) => ({
+    ...state,
+    cards: state.cards.map((card, i) => (card.matched || state.revealed.includes(i) ? card : { ...card, face: '' })),
+    elapsedMs: 0,
+  }),
 };

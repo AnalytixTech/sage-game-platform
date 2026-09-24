@@ -172,7 +172,7 @@ Send `config` when creating a session, or set per-app defaults on the platform. 
 { "questions": [{ "question": "What does BRP stand for?", "answer": "Biometric Residence Permit", "wrong": ["British Rail Pass", "Border Return Paper"] }] }
 ```
 
-Or store a bank once and refer to it by id:
+Or store a bank once and refer to it by id. The easiest way is the portal's **Quiz banks** tab, where you can type questions in or paste them straight from a spreadsheet (columns: Question, Correct answer, Wrong 1, Wrong 2, Wrong 3). Your backend can do the same through the API:
 
 ```bash
 curl -X PUT $API/v2/quiz-banks/relocation -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
@@ -305,6 +305,12 @@ The `match.finished` webhook carries `{ matchId, gameId, contextId, standings, f
 - Battles run on a single API instance and live in memory while they're played. A server restart **aborts** any battle in progress (status `aborted`); lobbies survive.
 - On Render, use a paid plan: a sleeping free instance drops every open connection.
 - The WebSocket accepts at most 40 messages a second per player and 16 KB per message. The seat token goes in the first message, never in the URL.
+
+### Hidden information
+
+In Memory Match and Quiz Master battles the app never holds the answers. There's no seed or config on the device: the server plays the game and sends each player only what they're allowed to see (the cards they've turned over, a question's answer once they've answered it). A modified app can't peek at card faces or quiz answers, including answers from your own quiz banks. Flips and answers appear after one round trip to the server, usually well under a tenth of a second. `MatchLauncher` and `useMatch` handle this for you; nothing changes in your integration.
+
+Solo games still run on the device (with the server replaying every move), so a solo quiz's answers are on the phone. Use battles when the stakes are high.
 
 ## Local development
 

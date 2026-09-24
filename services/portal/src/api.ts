@@ -55,6 +55,28 @@ export interface UsageDay {
   verified: number;
 }
 
+export interface QuizBankSummary {
+  bankId: string;
+  name: string;
+  questionCount: number;
+  updatedAt: string;
+}
+
+export interface QuizQuestion {
+  id?: string;
+  question: string;
+  answer: string;
+  wrong: string[];
+  category?: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
+}
+
+export interface QuizBank {
+  bankId: string;
+  name: string;
+  questions: QuizQuestion[];
+}
+
 let supabase: SupabaseClient | null = null;
 let config: PortalConfig | null = null;
 

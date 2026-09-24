@@ -21,6 +21,13 @@ const schema = z.object({
   SUPABASE_JWT_SECRET: z.string().optional(),
   /** Bootstrap keys "tenant_id:secret,..." kept working until tenants are on portal-issued keys. */
   SAGE_TENANT_KEYS: z.string().optional(),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
+  /** 'json' (one object per line) by default in production, readable lines elsewhere. */
+  LOG_FORMAT: z.enum(['json', 'pretty']).optional(),
+  /** Report unexpected errors to Sentry. Unset: errors are only logged. */
+  SENTRY_DSN: z.string().url().optional(),
+  /** Set by Render; tags Sentry reports with the deployed commit. */
+  RENDER_GIT_COMMIT: z.string().optional(),
 });
 
 export interface AppConfig {
@@ -34,10 +41,15 @@ export interface AppConfig {
   supabaseAnonKey: string;
   supabaseJwtSecret?: string;
   bootstrapTenantKeys?: string;
+  logLevel: 'debug' | 'info' | 'warn' | 'error' | 'silent';
+  logFormat: 'json' | 'pretty';
+  sentryDsn?: string;
+  release?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = schema.safeParse(env);
+  // An empty variable (SENTRY_DSN= in a .env file) means "not set".
+  const parsed = schema.safeParse(Object.fromEntries(Object.entries(env).filter(([, v]) => v !== '')));
   if (!parsed.success) {
     const problems = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Invalid configuration: ${problems}`);
@@ -60,6 +72,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     supabaseAnonKey: c.SUPABASE_ANON_KEY,
     supabaseJwtSecret: c.SUPABASE_JWT_SECRET,
     bootstrapTenantKeys: c.SAGE_TENANT_KEYS,
+    logLevel: c.LOG_LEVEL,
+    logFormat: c.LOG_FORMAT ?? (c.NODE_ENV === 'production' ? 'json' : 'pretty'),
+    sentryDsn: c.SENTRY_DSN,
+    release: c.RENDER_GIT_COMMIT,
   };
 }
 
@@ -75,6 +91,8 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     supabaseUrl: 'https://test-project.supabase.co',
     supabaseAnonKey: 'test-anon-key',
     supabaseJwtSecret: 'test-jwt-secret-with-at-least-32-characters!!',
+    logLevel: 'silent',
+    logFormat: 'json',
     ...overrides,
   };
 }

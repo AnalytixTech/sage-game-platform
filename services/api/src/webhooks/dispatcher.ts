@@ -94,7 +94,7 @@ export function startWebhookWorker(ctx: AppContext, intervalMs = 5000): () => vo
     if (running) return;
     running = true;
     dispatchDue(ctx)
-      .catch((err) => ctx.log('webhook dispatch failed', err))
+      .catch((err) => ctx.logger.error('webhook dispatch failed', { component: 'webhooks', err }))
       .finally(() => {
         running = false;
       });

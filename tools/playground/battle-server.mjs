@@ -17,6 +17,7 @@ const { syncCatalog } = api('catalog.js');
 const { attachRealtime } = api('realtime/wsServer.js');
 const { createTenant, createApiKey } = api('services/tenants.js');
 const { ALL_GAME_IDS } = api('catalog.js');
+const { createLogger } = api('observability/logger.js');
 
 const PORT = Number(process.env.PORT ?? 4100);
 
@@ -34,7 +35,7 @@ await syncCatalog(db);
 await db.tx((q) => createTenant(q, { id: 'dev_app', name: 'Playground', gameIds: ALL_GAME_IDS }));
 const { key } = await createApiKey(db, { tenantId: 'dev_app', mode: 'live', label: 'dev', userId: null, pepper: config.apiKeyPepper });
 
-const ctx = { db, config, verifyPortalToken: async () => null, now: () => new Date(), log: (m, e) => console.error(m, e ?? '') };
+const ctx = { db, config, verifyPortalToken: async () => null, now: () => new Date(), logger: createLogger({ level: 'warn', format: 'pretty' }) };
 const app = createApp(ctx, { realtime: { countdownMs: 3000, graceMs: 30_000, tickMs: 250, lingerMs: 120_000 } });
 
 const call = async (method, url, body) => {
