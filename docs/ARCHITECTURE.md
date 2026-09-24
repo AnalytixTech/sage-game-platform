@@ -48,6 +48,17 @@ Every session records the `rulesVersion` of its game. Anything that changes how 
 
 An SDK whose version differs from the server's gets `426 sdk_update_required`, and the launcher asks the player to update the app.
 
+## Battles (race mode)
+
+A match gives every player the same seed and config. Each seat is an ordinary `game_sessions` row (mode `match`), so a battle result is stored, ranked and reported exactly like a solo one.
+
+- **Transport.** WebSocket at `/v2/ws` on the API server. The first message must be `{type:'auth', token}` within 5 s; the token never goes in the URL.
+- **The server applies moves live.** Each `action` runs through the same rules as the client, with its time clamped to `[previous move, time the server has seen pass]`. A client can't backdate moves or claim to be faster than the server saw. Illegal moves are answered with `reject` and ignored.
+- **Match room.** One `MatchRoom` per live match, in memory, runs the lobby, the countdown, a 4-per-second progress broadcast, the 30-second grace for disconnects (then forfeit) and the time limit. At the end, one transaction stores each player's replayed result, the standings and the `match.finished` webhook.
+- **Reconnect.** `welcome` carries the moves the server already applied, and the client rebuilds its game from them, so the server's view always wins.
+- **Ranking.** Each game's `rules.race` is either `time_then_score` (Sudoku, Word Search, Memory: first to solve) or `score_then_time` (Quiz, Word Rush). Forfeits rank last.
+- **Single instance.** Rooms aren't shared between servers. On startup, matches left in `countdown` or `in_progress` are marked `aborted`; lobbies are reloaded from the database when someone connects.
+
 ## Data (Supabase Postgres, `sagegames` schema)
 
 ```text
@@ -58,6 +69,7 @@ tenants ─┬─ tenant_members ── auth.users        (portal accounts, Supa
          ├─ game_sessions ─┬─ session_logs      (the submitted move log + hash)
          │                 └─ game_results      (verified/rejected, score, flags, is_valid)
          ├─ player_stats
+         ├─ matches ── match_players ── game_sessions   (battles: one seat = one session)
          └─ webhook_deliveries                  (outbox, retried with backoff)
 ```
 
@@ -89,4 +101,5 @@ Keys and session tokens are stored only as hashes. Test-key results never reach 
 | Engine and games | Vitest: golden values, determinism snapshots, live-vs-replay parity, property tests with fast-check, and a regression test per known bug |
 | API | Vitest + supertest against **PGlite** (real Postgres in WASM) with the same Supabase migrations |
 | SDK ↔ API | `SessionController` against the real API over HTTP: offline recovery, retries, SDK version mismatch |
-| UI | `npm run test:ui`: Playwright plays every game in both SDKs (React Native through react-native-web) with clicks, drags and taps, and checks the verified result screen. Runs in CI and uploads screenshots. |
+| Battles | Vitest against the real WebSocket server with short timers: lobby → standings, group joins, lobby timeout, forfeit after the grace period, resume after reconnect, move-time clamping, tenant isolation, plus the SDK's `MatchController` racing and reconnecting |
+| UI | `npm run test:ui`: Playwright plays every game in both SDKs (React Native through react-native-web) with clicks, drags and taps, and checks the verified result screen. `npm run test:battle` races two players through the real API. Both run in CI and upload screenshots. |

@@ -1,6 +1,6 @@
 {
   "name": "@sagegames/game-sudoku",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Sudoku Game Module for SageGame Platform",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,8 +8,8 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@sagegames/engine": "2.0.0",
-    "@sagegames/types": "2.0.0"
+    "@sagegames/engine": "2.1.0",
+    "@sagegames/types": "2.1.0"
   },
   "files": [
     "dist"

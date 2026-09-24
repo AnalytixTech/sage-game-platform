@@ -1,6 +1,6 @@
 {
   "name": "@sagegames/types",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Core TypeScript definitions and contracts for SageGame Platform",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

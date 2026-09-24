@@ -5,7 +5,7 @@
  *   ?view=launcher&game=<gameId>                   the full launcher against a mock server
  *   &theme=dark|light
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { View } from 'react-native';
 import { replay } from '@sagegames/engine';
@@ -16,6 +16,7 @@ import {
   GameLauncher,
   GamePreview,
   lightTheme,
+  MatchLauncher,
   memoryMatch,
   quizMaster,
   SageGameProvider,
@@ -131,7 +132,47 @@ function WebApp() {
   );
 }
 
+/**
+ * ?view=battle: every player of one match side by side (needs tools/playground/battle-server.mjs).
+ * Add &sdk=web for the web launcher, &game=<gameId>, &players=<n>.
+ */
+function BattleApp() {
+  const [battle, setBattle] = useState<{ seats: { matchId: string; playerToken: string }[]; names: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('http://127.0.0.1:4100/dev/battle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameId: params.get('game') ?? 'game_memory_001', players: Number(params.get('players') ?? 2) }),
+    })
+      .then((r) => r.json())
+      .then(setBattle)
+      .catch(() => setError('Start the battle server: node tools/playground/battle-server.mjs'));
+  }, []);
+  if (error) return <p style={{ padding: 16 }}>{error}</p>;
+  if (!battle) return <p style={{ padding: 16 }}>Setting up battle…</p>;
+  const base = 'http://127.0.0.1:4100';
+  return (
+    <div style={{ display: 'flex', gap: 2, background: '#333', minHeight: '100vh' }}>
+      {battle.seats.map((seat, i) => (
+        <div key={seat.playerToken} data-testid={`player-${i}`} style={{ flex: 1, minWidth: 0, height: '100vh', display: 'flex', flexDirection: 'column' }}>
+          {web ? (
+            <Web.SageGameProvider games={Web.allGames} theme={theme} baseUrl={base}>
+              <Web.MatchLauncher seat={seat} style={{ minHeight: '100vh' }} />
+            </Web.SageGameProvider>
+          ) : (
+            <SageGameProvider games={allGames} theme={theme} baseUrl={base}>
+              <MatchLauncher seat={seat} />
+            </SageGameProvider>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function App() {
+  if (view === 'battle') return <BattleApp />;
   if (web) return <WebApp />;
   if (view === 'launcher') {
     const gameId = params.get('game') ?? 'game_memory_001';

@@ -6,6 +6,9 @@ import { loadConfig } from './config';
 import { createPgDb, one } from './db/db';
 import { parseBootstrapKeys } from './http/auth';
 import { AppContext } from './http/context';
+import { attachRealtime } from './realtime/wsServer';
+import { MatchHub } from './realtime/MatchRoom';
+import { abortStaleMatches } from './services/matches';
 import { ensureBootstrapTenants } from './services/tenants';
 import { startWebhookWorker } from './webhooks/dispatcher';
 
@@ -19,6 +22,8 @@ async function main() {
   }
 
   await syncCatalog(db);
+  const aborted = await abortStaleMatches(db);
+  if (aborted) console.log(`Marked ${aborted} interrupted match(es) as aborted`);
   const bootstrapKeys = parseBootstrapKeys(config.bootstrapTenantKeys);
   await ensureBootstrapTenants(db, bootstrapKeys.map((k) => k.tenantId));
 
@@ -38,10 +43,12 @@ async function main() {
   const server = app.listen(config.port, () => {
     console.log(`SageGames API listening on :${config.port} (${config.env})`);
   });
+  const realtime = attachRealtime(server, ctx, app.locals.matchHub as MatchHub);
 
   const shutdown = (signal: string) => {
     console.log(`${signal} received, shutting down`);
     stopWebhooks();
+    void realtime.close();
     server.close(() => {
       db.close().finally(() => process.exit(0));
     });

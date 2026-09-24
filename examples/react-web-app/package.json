@@ -5,7 +5,7 @@
   "description": "Example React Web App integrating @sagegames/react SDK",
   "main": "src/App.tsx",
   "dependencies": {
-    "@sagegames/react": "2.0.0",
+    "@sagegames/react": "2.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   }

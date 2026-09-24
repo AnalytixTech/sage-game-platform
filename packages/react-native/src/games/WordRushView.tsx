@@ -1,8 +1,8 @@
 import React, { useMemo, useRef } from 'react';
-import { GestureResponderEvent, PanResponder, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { GestureResponderEvent, PanResponder, ScrollView, Text, View } from 'react-native';
 import type { WordRushState } from '@sagegames/game-word-rush';
 import { formatClock, GameViewProps, SageLabels, useWordRush } from '@sagegames/react-headless';
-import { Button, font, ProgressBar, Stat } from '../ui/primitives';
+import { Button, font, ProgressBar, Stat, useBoardWidth } from '../ui/primitives';
 
 const REJECTION_LABEL = (labels: SageLabels): Record<string, string> => ({
   not_adjacent: labels.notAdjacent,
@@ -13,10 +13,9 @@ const REJECTION_LABEL = (labels: SageLabels): Record<string, string> => ({
 
 export function WordRushView({ state, dispatch, elapsedMs, theme, labels, paused, ended }: GameViewProps<WordRushState>) {
   const rush = useWordRush(state, elapsedMs, dispatch);
-  const { width } = useWindowDimensions();
+  const { width: boardWidth, onLayout } = useBoardWidth(400, theme.spacing.lg);
   const c = theme.colors;
   const gap = 8;
-  const boardWidth = Math.min(width - theme.spacing.lg * 2, 400);
   const tile = (boardWidth - gap * (state.size - 1)) / state.size;
   const pitch = tile + gap;
 
@@ -77,7 +76,7 @@ export function WordRushView({ state, dispatch, elapsedMs, theme, labels, paused
   const lowTime = rush.remainingMs < 10_000;
 
   return (
-    <View style={{ gap: theme.spacing.md, alignItems: 'center' }}>
+    <View onLayout={onLayout} style={{ gap: theme.spacing.md, alignItems: 'center' }}>
       <View style={{ alignSelf: 'stretch', gap: theme.spacing.sm }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <Stat label={labels.words} value={state.found.length} />

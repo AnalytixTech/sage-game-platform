@@ -201,7 +201,7 @@ Only act on `valid: true`. Results flagged as implausible, rejected, or made wit
 ## 4. Japabudz-App: install SDK 2.0
 
 ```bash
-npm install @sagegames/react-native@^2.0.0
+npm install @sagegames/react-native@^2.1.0
 npm uninstall @sagegames/types     # it now comes with the SDK
 ```
 
@@ -338,6 +338,203 @@ What players get:
 
 ---
 
+## 8. Battles: challenge a friend or the whole group (SDK 2.1)
+
+In a battle everyone gets the same puzzle and races it live, with each other's progress on screen. How it flows in Japabudz:
+
+1. In a DM or group, a player taps **Challenge** and picks a game.
+2. japabudz-server creates a SageGames match and posts a `GAME_INVITE` message in the chat.
+3. Anyone who taps **Join** on the invite asks japabudz-server for a seat, and the app opens `MatchLauncher`.
+4. When everyone in the lobby is ready, a 3-second countdown starts the race. Results arrive in the `match.finished` webhook, and the server posts the standings in the chat.
+
+A DM battle is invite-only for the two people in it. A group battle is open to any member until the lobby closes (2 minutes); it starts early once everyone who joined is ready, and needs at least 2 players.
+
+### 8a. japabudz-server: create a battle and post the invite
+
+Add to `src/routes/v2/games.routes.ts`:
+
+```ts
+import prisma from '../../config/prisma';
+import { encrypt } from '../../utils/encryption';
+import { emitConversationEvent, emitGroupEvent } from '../../services/socket.service';
+
+async function sage(method: 'GET' | 'POST', path: string, payload?: unknown) {
+  const r = await fetch(`${SAGEGAMES_API_URL}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${process.env.SAGEGAMES_API_KEY}`, 'Content-Type': 'application/json' },
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  const data = await r.json();
+  if (!r.ok) throw Object.assign(new Error(data.error ?? 'SageGames request failed'), { status: r.status, code: data.code });
+  return data;
+}
+
+/** The chat a user may battle in, as a SageGames contextId (or null if they're not in it). */
+async function chatContext(userId: string, chat: { conversationId?: string; groupId?: string }) {
+  if (chat.conversationId) {
+    const convo = await prisma.conversation.findFirst({
+      where: { id: chat.conversationId, participants: { has: userId } },
+      select: { id: true, participants: true },
+    });
+    return convo ? { contextId: `dm:${convo.id}`, participants: convo.participants } : null;
+  }
+  if (chat.groupId) {
+    const member = await prisma.groupMembership.findUnique({
+      where: { userId_groupId: { userId, groupId: chat.groupId } },
+      select: { groupId: true },
+    });
+    return member ? { contextId: `group:${chat.groupId}`, participants: null } : null;
+  }
+  return null;
+}
+
+const displayName = (u: { firstName?: string | null; username?: string | null }) => u.firstName || u.username || 'Player';
+
+/** POST /api/v2/games/battles  { gameId, conversationId | groupId } */
+router.post('/battles', authenticateToken, requireApprovedUser, async (req, res) => {
+  const parsed = body.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' });
+  const { gameId, conversationId, groupId } = parsed.data;
+  const user = req.user!;
+  const chat = await chatContext(user.id, { conversationId, groupId });
+  if (!chat) return res.status(404).json({ error: 'Chat not found' });
+
+  let players = [{ externalUserId: user.id, displayName: displayName(user) }];
+  if (chat.participants) {
+    const others = await prisma.user.findMany({
+      where: { id: { in: chat.participants.filter((id) => id !== user.id) } },
+      select: { id: true, firstName: true, username: true },
+    });
+    players = [...players, ...others.map((o) => ({ externalUserId: o.id, displayName: displayName(o) }))];
+  }
+
+  let match;
+  try {
+    match = await sage('POST', '/v2/matches', {
+      gameId,
+      players,
+      allowJoin: !!groupId,        // groups: members join from the invite
+      maxPlayers: groupId ? 8 : 2,
+      lobbyTimeoutSec: 120,
+      contextId: chat.contextId,
+      config: GAME_CONFIG[gameId],
+    });
+  } catch (e) {
+    console.error('[sagegames] match failed', e);
+    return res.status(502).json({ error: 'Could not start the battle. Please try again.' });
+  }
+
+  // The invite: an ordinary chat message the app renders as a card with a Join button.
+  const text = `${displayName(user)} started a battle. Tap to join!`;
+  const invite = { matchId: match.matchId, gameId, lobbyExpiresAt: match.lobbyExpiresAt };
+  if (conversationId) {
+    const message = await prisma.message.create({
+      data: { conversationId, senderId: user.id, content: encrypt(text), messageType: 'GAME_INVITE', attachments: invite },
+    });
+    emitConversationEvent(conversationId, 'new_message', { ...message, content: text });
+  } else {
+    const message = await prisma.groupMessage.create({
+      data: { groupId: groupId!, senderId: user.id, content: encrypt(text), messageType: 'GAME_INVITE', attachments: invite },
+    });
+    emitGroupEvent(groupId!, 'new_group_message', { ...message, content: text });
+  }
+
+  res.status(201).json({ matchId: match.matchId });
+});
+```
+
+### 8b. japabudz-server: hand out seats
+
+The app calls this when a player taps **Join** (and again whenever it reconnects). The match's `contextId` says which chat it belongs to, so membership is checked against the chat, not trusted from the request:
+
+```ts
+/** POST /api/v2/games/battles/:matchId/seat → { matchId, playerToken } */
+router.post('/battles/:matchId/seat', authenticateToken, requireApprovedUser, async (req, res) => {
+  const user = req.user!;
+  try {
+    const match = await sage('GET', `/v2/matches/${encodeURIComponent(req.params.matchId)}`);
+    const [kind, id] = String(match.contextId ?? '').split(':');
+    const chat = await chatContext(user.id, kind === 'dm' ? { conversationId: id } : kind === 'group' ? { groupId: id } : {});
+    if (!chat) return res.status(404).json({ error: 'Battle not found' });
+
+    const seated = match.players.some((p: { externalUserId: string }) => p.externalUserId === user.id);
+    const seat = seated
+      ? await sage('POST', `/v2/matches/${match.matchId}/tokens`, { externalUserId: user.id })
+      : await sage('POST', `/v2/matches/${match.matchId}/players`, { externalUserId: user.id, displayName: displayName(user) });
+    res.json({ matchId: seat.matchId, playerToken: seat.playerToken });
+  } catch (e: any) {
+    const messages: Record<string, string> = {
+      match_started: 'This battle has already started.',
+      match_full: 'This battle is full.',
+      match_closed: 'This battle is over.',
+      invite_only: 'This battle is invite-only.',
+    };
+    res.status(e.status === 404 ? 404 : 409).json({ error: messages[e.code] ?? 'Could not join the battle.' });
+  }
+});
+```
+
+### 8c. japabudz-server: post the standings
+
+Extend the webhook handler from step 3:
+
+```ts
+if (event.type === 'match.finished') {
+  const { contextId, gameId, standings } = event.data;
+  const medal = ['🥇', '🥈', '🥉'];
+  const lines = standings.map((s: any) =>
+    `${medal[s.rank - 1] ?? `${s.rank}.`} ${s.displayName} (${s.status === 'forfeited' ? 'left' : s.score})`);
+  const text = `Battle results\n${lines.join('\n')}`;
+  // Post `text` into the chat named by contextId ("dm:<id>" or "group:<id>") as a system message,
+  // like the sponsored-jobs cron does, and award rewards to standings[0].externalUserId.
+}
+```
+
+Each player's score also arrives separately as a `session.completed` event, with `data.matchId` set. If you already post solo scores from that event, skip the ones that have a `matchId`, so a battle isn't announced twice.
+
+### 8d. Japabudz-App: the invite card and the battle screen
+
+```ts
+// lib/api/sage-game.ts
+export async function createBattle(gameId: string, chat: GameChat) {
+  const { data } = await apiClient.post<{ matchId: string }>('/v2/games/battles', { gameId, ...chat });
+  return data;
+}
+
+export async function getBattleSeat(matchId: string) {
+  const { data } = await apiClient.post<{ matchId: string; playerToken: string }>(`/v2/games/battles/${matchId}/seat`);
+  return data;
+}
+```
+
+`components/sage-game/BattleModal.tsx`:
+
+```tsx
+import React from 'react';
+import { Modal, SafeAreaView } from 'react-native';
+import { MatchLauncher, useSage } from '@sagegames/react-native';
+import { getBattleSeat } from '@/lib/api/sage-game';
+
+export function BattleModal({ matchId, onClose }: { matchId: string | null; onClose: () => void }) {
+  const { theme } = useSage();
+  return (
+    <Modal visible={!!matchId} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
+        {matchId && <MatchLauncher key={matchId} getSeat={() => getBattleSeat(matchId)} onClose={onClose} />}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+```
+
+In the chat message list (`conversation.tsx` and `group-chat.tsx`), render messages with `messageType === 'GAME_INVITE'` as a card with the game's name and a **Join** button that opens `<BattleModal matchId={message.attachments.matchId} />`. Hide the button once `lobbyExpiresAt` has passed. To start a battle, add a **Challenge** action next to the existing games entry that calls `createBattle(gameId, { conversationId })` or `createBattle(gameId, { groupId })` and then opens the modal with the returned `matchId`. The player who started the battle joins the same way as everyone else.
+
+`MatchLauncher` shows the lobby with a **ready** button, the countdown, the game with a live progress bar for each player, a waiting screen once you finish, and the final standings. If the phone loses its connection, it reconnects and carries on. Players who stay away for more than 30 seconds, or who leave, forfeit.
+
+> Battles need the API on a paid Render plan. A sleeping free instance drops every connection, and a restart aborts any battle in progress.
+
+---
+
 ## Checklist
 
 - [ ] `SAGEGAMES_API_KEY`, `SAGEGAMES_API_URL` and `SAGEGAMES_WEBHOOK_SECRET` are set on japabudz-server (and nowhere in the app)
@@ -348,6 +545,9 @@ What players get:
 - [ ] Airplane mode at the end of a game → "retrying" → turn it off → the score arrives. Closing and reopening the app also sends it.
 - [ ] The webhook receives `session.completed`, and a request with a tampered body is rejected (400)
 - [ ] The portal's **Usage** tab shows sessions, and its **Webhook** tab shows deliveries
+- [ ] Battles: a DM challenge posts an invite, both phones join, race, and see the same standings; the results message appears in the chat
+- [ ] Battles: in a group, three members join from one invite; someone outside the group gets 404 from `/battles/:matchId/seat`
+- [ ] Battles: switching one phone to airplane mode for a few seconds mid-race resumes where it left off; staying offline for over 30 seconds forfeits
 
 ## Troubleshooting
 
@@ -356,4 +556,6 @@ What players get:
 | "Could not start the game" | japabudz-server's call to `/v2/sessions` failed. Check its logs: `403 invalid_api_key` means the key is wrong or revoked, and `403 game_not_enabled` means the game is off on the portal's Games tab. |
 | "This game has been updated. Please update the app to play it." | The server runs newer game rules than the app's SDK. Update `@sagegames/react-native`. |
 | First game after a quiet period takes a while to load | The API is on Render's free plan, which sleeps after 15 minutes. Use a paid plan in production. |
+| Battle stuck on "Connecting…" | The WebSocket can't reach `wss://<api-host>/v2/ws`. Check that the API is awake and that no proxy strips the `Upgrade` header. |
+| "Not enough players were ready, so this battle was cancelled." | The lobby closed (2 minutes) before at least 2 players were ready. |
 | Score shows "This score is not ranked." | It was flagged as implausible (for example, answers faster than a human could give them), or it came from a test key. |

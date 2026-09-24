@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { AnyGameRules, CompletionResult, Game, GameCategory, Leaderboard, SessionCredentials } from '@sagegames/types';
-import { GameRuntime, LauncherEvent, LauncherState, LeaderboardQuery, RuntimeSnapshot, SessionController } from '@sagegames/core';
+import { AnyGameRules, CompletionResult, Game, GameCategory, Leaderboard, MatchStanding, SessionCredentials } from '@sagegames/types';
+import {
+  GameRuntime,
+  LauncherEvent,
+  LauncherState,
+  LeaderboardQuery,
+  MatchController,
+  MatchSeat,
+  RuntimeSnapshot,
+  SessionController,
+  WebSocketLike,
+} from '@sagegames/core';
 import { useSage } from '../provider';
 
 /** Run `fn` every `ms` while `active`. */
@@ -144,6 +154,61 @@ export function useGames(filter: { category?: GameCategory } = {}) {
   }, [client, plugins, filter.category]);
 
   return { games, loading, error };
+}
+
+export interface UseMatchOptions {
+  /** Your seat (from your backend)… */
+  seat?: MatchSeat;
+  /** …or a function that asks your backend for it. */
+  getSeat?: () => Promise<MatchSeat>;
+  onFinished?: (standings: MatchStanding[]) => void;
+  /** Custom WebSocket factory (defaults to the global WebSocket). */
+  createSocket?: (url: string) => WebSocketLike;
+}
+
+/** Drives one online battle: lobby → countdown → race → standings. */
+export function useMatch(options: UseMatchOptions) {
+  const { client, plugins } = useSage();
+  const callbacks = useRef(options);
+  callbacks.current = options;
+  const seatKey = options.seat ? `${options.seat.matchId}:${options.seat.playerToken}` : 'getSeat';
+
+  const controller = useMemo(
+    () =>
+      new MatchController({
+        baseUrl: client.baseUrl,
+        resolveRules: (gameId) => plugins.get(gameId)?.rules,
+        seat: options.seat,
+        getSeat: options.getSeat ? () => callbacks.current.getSeat!() : undefined,
+        createSocket: options.createSocket,
+        onStandings: (s) => callbacks.current.onFinished?.(s),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, plugins, seatKey]
+  );
+
+  useEffect(() => {
+    void controller.connect();
+    return () => controller.dispose();
+  }, [controller]);
+
+  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  useInterval(() => controller.tick(), 250, state.phase === 'playing');
+
+  // Re-render every 100ms during the countdown so the number ticks down.
+  const [, setTick] = useState(0);
+  useInterval(() => setTick((n) => n + 1), 100, state.phase === 'countdown');
+
+  const me = state.match?.players.find((p) => p.playerId === state.you) ?? null;
+  return {
+    state,
+    me,
+    plugin: state.match ? plugins.get(state.match.gameId) : undefined,
+    secondsToStart: state.startsAtLocal ? Math.max(0, Math.ceil((state.startsAtLocal - Date.now()) / 1000)) : null,
+    ready: () => controller.ready(),
+    forfeit: () => controller.forfeit(),
+    retry: () => controller.retry(),
+  };
 }
 
 /**

@@ -1,17 +1,16 @@
 import React, { useMemo, useRef } from 'react';
-import { GestureResponderEvent, PanResponder, Text, useWindowDimensions, View } from 'react-native';
+import { GestureResponderEvent, PanResponder, Text, View } from 'react-native';
 import type { WordSearchState } from '@sagegames/game-word-search';
 import { GameViewProps, GridCell, useWordSearch } from '@sagegames/react-headless';
-import { Body, font, Stat } from '../ui/primitives';
+import { Body, font, Stat, useBoardWidth } from '../ui/primitives';
 
 /** Soft colours for found words (overlaid on the theme's highlight). */
 const FOUND_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe', '#fed7aa', '#a7f3d0', '#c7d2fe'];
 
 export function WordSearchView({ state, dispatch, theme, labels, paused, ended }: GameViewProps<WordSearchState>) {
   const ws = useWordSearch(state, dispatch);
-  const { width } = useWindowDimensions();
+  const { width: maxWidth, onLayout } = useBoardWidth(480, theme.spacing.lg);
   const c = theme.colors;
-  const maxWidth = Math.min(width - theme.spacing.lg * 2, 480);
   const BORDER = 1;
   // Whole-pixel cells that fit inside the border, so rows never wrap early.
   const cellSize = Math.floor((maxWidth - BORDER * 2) / state.size);
@@ -54,7 +53,7 @@ export function WordSearchView({ state, dispatch, theme, labels, paused, ended }
   );
 
   return (
-    <View style={{ gap: theme.spacing.md, alignItems: 'center' }}>
+    <View onLayout={onLayout} style={{ gap: theme.spacing.md, alignItems: 'center' }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-around', alignSelf: 'stretch' }}>
         <Stat label={labels.found} value={`${state.foundCount}/${state.words.length}`} align="center" />
       </View>

@@ -42,7 +42,9 @@ describe('SDK SessionController against the real API', () => {
   });
 
   afterEach(async () => {
+    server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
+    await env.db.close();
   });
 
   /** What a host backend endpoint does: create a session with the API key. */
