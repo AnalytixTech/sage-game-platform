@@ -2,6 +2,11 @@
   "name": "@sagegames/game-word-search",
   "version": "2.1.0",
   "description": "Word Search Game Module for SageGame Platform with configurable categories and words",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnalytixTech/sage-game-platform.git",
+    "directory": "games/word-search"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

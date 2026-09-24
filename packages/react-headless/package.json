@@ -2,6 +2,11 @@
   "name": "@sagegames/react-headless",
   "version": "2.1.0",
   "description": "Platform-agnostic React bindings for SageGames: provider, launcher and game controller hooks",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnalytixTech/sage-game-platform.git",
+    "directory": "packages/react-headless"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

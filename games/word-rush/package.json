@@ -2,6 +2,11 @@
   "name": "@sagegames/game-word-rush",
   "version": "2.1.0",
   "description": "Word Rush Game Module for SageGame Platform",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnalytixTech/sage-game-platform.git",
+    "directory": "games/word-rush"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
