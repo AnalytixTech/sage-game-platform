@@ -1,11 +1,14 @@
-name: Automated NPM Package Release
+name: Publish NPM Packages
 
+# Publishes only when a version tag (e.g. v1.1.0) is pushed.
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   publish:
@@ -17,7 +20,7 @@ jobs:
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install Monorepo Dependencies
@@ -26,7 +29,27 @@ jobs:
       - name: Build All Monorepo Packages
         run: npm run build
 
-      - name: Publish All Workspaces to NPM Registry
-        run: npm publish --workspaces --access public
+      - name: Test
+        run: npm test
+
+      # Private workspaces (services, examples) are skipped. Versions already on npm are skipped
+      # instead of failing the job.
+      - name: Publish Public Workspaces
+        run: |
+          for dir in packages/* games/*; do
+            [ -f "$dir/package.json" ] || continue
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+            private=$(node -p "Boolean(require('./$dir/package.json').private)")
+            if [ "$private" = "true" ]; then
+              echo "Skipping private package $name"
+              continue
+            fi
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "Skipping $name@$version (already published)"
+              continue
+            fi
+            npm publish --workspace "$dir" --access public --provenance
+          done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

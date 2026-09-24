@@ -40,3 +40,16 @@ coverage/
 tmp/
 scratch/
 .cache/
+
+# Compiled output emitted next to sources (outputs belong in dist/)
+**/src/**/*.js
+**/src/**/*.js.map
+**/src/**/*.d.ts
+**/src/**/*.d.ts.map
+examples/**/*.js
+examples/**/*.js.map
+examples/**/*.d.ts
+examples/**/*.d.ts.map
+
+# Playground screenshots
+.ui-shots/

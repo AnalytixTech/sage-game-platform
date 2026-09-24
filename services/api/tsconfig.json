@@ -3,10 +3,35 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "composite": true
+    "composite": true,
+    "types": [
+      "node"
+    ]
   },
   "references": [
-    { "path": "../../packages/types" }
+    {
+      "path": "../../packages/types"
+    },
+    {
+      "path": "../../packages/engine"
+    },
+    {
+      "path": "../../games/memory-match"
+    },
+    {
+      "path": "../../games/quiz-master"
+    },
+    {
+      "path": "../../games/sudoku"
+    },
+    {
+      "path": "../../games/word-rush"
+    },
+    {
+      "path": "../../games/word-search"
+    }
   ],
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

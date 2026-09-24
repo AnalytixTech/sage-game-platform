@@ -16,28 +16,78 @@
     "baseUrl": ".",
     "types": [],
     "paths": {
-      "@sagegames/types": ["packages/types/src/index.ts"],
-      "@sagegames/core": ["packages/core/src/index.ts"],
-      "@sagegames/react": ["packages/react/src/index.ts"],
-      "@sagegames/react-native": ["packages/react-native/src/index.ts"],
-      "@sagegames/game-quiz-master": ["games/quiz-master/src/index.ts"],
-      "@sagegames/game-word-rush": ["games/word-rush/src/index.ts"],
-      "@sagegames/game-memory-match": ["games/memory-match/src/index.ts"],
-      "@sagegames/game-word-search": ["games/word-search/src/index.ts"],
-      "@sagegames/game-sudoku": ["games/sudoku/src/index.ts"]
+      "@sagegames/types": [
+        "packages/types/src/index.ts"
+      ],
+      "@sagegames/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@sagegames/react": [
+        "packages/react/src/index.ts"
+      ],
+      "@sagegames/react-native": [
+        "packages/react-native/src/index.ts"
+      ],
+      "@sagegames/game-quiz-master": [
+        "games/quiz-master/src/index.ts"
+      ],
+      "@sagegames/game-word-rush": [
+        "games/word-rush/src/index.ts"
+      ],
+      "@sagegames/game-memory-match": [
+        "games/memory-match/src/index.ts"
+      ],
+      "@sagegames/game-word-search": [
+        "games/word-search/src/index.ts"
+      ],
+      "@sagegames/game-sudoku": [
+        "games/sudoku/src/index.ts"
+      ],
+      "@sagegames/engine": [
+        "packages/engine/src/index.ts"
+      ],
+      "@sagegames/react-headless": [
+        "packages/react-headless/src/index.ts"
+      ]
     }
   },
   "files": [],
   "references": [
-    { "path": "./packages/types" },
-    { "path": "./packages/core" },
-    { "path": "./packages/react" },
-    { "path": "./packages/react-native" },
-    { "path": "./games/quiz-master" },
-    { "path": "./games/word-rush" },
-    { "path": "./games/memory-match" },
-    { "path": "./games/word-search" },
-    { "path": "./games/sudoku" },
-    { "path": "./services/api" }
+    {
+      "path": "./packages/types"
+    },
+    {
+      "path": "./packages/engine"
+    },
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./games/quiz-master"
+    },
+    {
+      "path": "./games/word-rush"
+    },
+    {
+      "path": "./games/memory-match"
+    },
+    {
+      "path": "./games/word-search"
+    },
+    {
+      "path": "./games/sudoku"
+    },
+    {
+      "path": "./packages/react-headless"
+    },
+    {
+      "path": "./packages/react"
+    },
+    {
+      "path": "./packages/react-native"
+    },
+    {
+      "path": "./services/api"
+    }
   ]
 }

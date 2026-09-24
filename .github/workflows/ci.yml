@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --include=dev --legacy-peer-deps
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+  # Plays every game in a real browser (React Native views via react-native-web, and the web SDK)
+  # with clicks, drags and taps, and checks the verified result screen.
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --include=dev --legacy-peer-deps
+
+      - name: Build packages
+        run: npm run build:packages
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start playground
+        run: npm run playground > playground.log 2>&1 &
+
+      - name: Wait for playground
+        run: npx wait-on http://localhost:5199 --timeout 60000
+
+      - name: Play every game
+        run: npm run test:ui
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: .ui-shots

@@ -1,6 +1,6 @@
 {
   "name": "@sagegames/game-memory-match",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Memory Match Game Module for SageGame Platform",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,6 +8,10 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@sagegames/types": "1.0.0"
-  }
+    "@sagegames/engine": "2.0.0",
+    "@sagegames/types": "2.0.0"
+  },
+  "files": [
+    "dist"
+  ]
 }

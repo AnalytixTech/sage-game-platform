@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true,
+    "target": "ES2019"
+  },
+  "references": [
+    { "path": "../types" },
+    { "path": "../engine" },
+    { "path": "../core" },
+    { "path": "../../games/memory-match" },
+    { "path": "../../games/quiz-master" },
+    { "path": "../../games/sudoku" },
+    { "path": "../../games/word-rush" },
+    { "path": "../../games/word-search" }
+  ],
+  "include": ["src/**/*"]
+}

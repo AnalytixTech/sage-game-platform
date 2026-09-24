@@ -1,0 +1,21 @@
+{
+  "name": "@sagegames/portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SageGames developer portal: sign up, create apps and manage API keys",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.1.1"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

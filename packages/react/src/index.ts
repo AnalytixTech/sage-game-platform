@@ -1,9 +1,9 @@
-export * from './providers/SageGameProvider';
-export * from './hooks/useGames';
-export * from './hooks/useGame';
-export * from './hooks/useGameSession';
-export * from './hooks/useGameState';
-export * from './hooks/useGameResult';
-export * from './components/GameCatalog';
-export * from './components/GameLauncher';
-export * from './components/Game';
+// Shared provider, hooks, theme and types
+export * from '@sagegames/react-headless';
+export { SageGameClient, SageApiError } from '@sagegames/core';
+export type { LauncherEvent, LauncherState, PendingStore } from '@sagegames/core';
+export type { CompletionResult, SessionCredentials, Leaderboard, Game } from '@sagegames/types';
+
+// Web UI
+export * from './components';
+export * from './games';

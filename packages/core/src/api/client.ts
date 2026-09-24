@@ -1,143 +1,149 @@
 import {
+  ActionLog,
+  ApiErrorBody,
+  CompletionResult,
   Game,
   GameCategory,
-  GameResult,
-  GameSession,
   Leaderboard,
-  LeaderboardQuery,
-  PlayerStats,
+  LeaderboardPeriod,
+  PlayInfo,
 } from '@sagegames/types';
 
+export const DEFAULT_BASE_URL = 'https://sage-game-platform.onrender.com';
+
+type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
 export interface SageGameClientOptions {
+  /** API origin, e.g. https://sage-game-platform.onrender.com */
   baseUrl?: string;
-  sessionToken?: string;
+  /** Custom fetch (tests, polyfills). Defaults to the global fetch. */
+  fetch?: FetchLike;
 }
 
-export interface GameListFilter {
-  category?: GameCategory;
-  search?: string;
+export class SageApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly code?: string,
+    public readonly body?: unknown
+  ) {
+    super(message);
+    this.name = 'SageApiError';
+  }
+
+  /** Worth retrying: network failure (status 0), rate limit or a server error. */
+  get retryable(): boolean {
+    return this.status === 0 || this.status === 429 || this.status >= 500;
+  }
 }
 
+export interface LeaderboardQuery {
+  /** 'context' (default) limits the board to the session's chat/group; 'game' covers the whole app. */
+  scope?: 'context' | 'game';
+  period?: LeaderboardPeriod;
+  limit?: number;
+  offset?: number;
+}
+
+function query(params: Record<string, string | number | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined) as [string, string | number][];
+  return entries.length ? `?${entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')}` : '';
+}
+
+async function request<T>(fetchImpl: FetchLike, url: string, init: RequestInit = {}, token?: string): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  // Only send Content-Type with a body: on a GET it would force a CORS preflight.
+  if (init.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetchImpl(url, { ...init, headers: { ...headers, ...(init.headers as Record<string, string>) } });
+  } catch (err) {
+    throw new SageApiError(0, err instanceof Error ? err.message : 'Network request failed', 'network_error');
+  }
+
+  const text = await res.text();
+  let body: unknown = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = text;
+  }
+  // /complete answers 422 with a full CompletionResult when the log is rejected.
+  if (res.ok || (res.status === 422 && typeof body === 'object' && body !== null && 'status' in body)) {
+    return body as T;
+  }
+  const err = (body ?? {}) as ApiErrorBody;
+  throw new SageApiError(res.status, err.error ?? `Request failed (${res.status})`, err.code, body);
+}
+
+/**
+ * Public SageGames API client. Session calls go through `forSession(token)`, which returns a
+ * client bound to one session token, so tokens are never shared between games.
+ */
 export class SageGameClient {
-  private baseUrl: string;
-  private sessionToken?: string;
+  public readonly baseUrl: string;
+  private readonly fetchImpl: FetchLike;
 
   constructor(options: SageGameClientOptions = {}) {
-    this.baseUrl = options.baseUrl || 'https://api.sagegame.com';
-    this.sessionToken = options.sessionToken;
-  }
-
-  public setSessionToken(token: string): void {
-    this.sessionToken = token;
-  }
-
-  public getSessionToken(): string | undefined {
-    return this.sessionToken;
-  }
-
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(options.headers as Record<string, string>),
-    };
-
-    if (this.sessionToken) {
-      headers['Authorization'] = `Bearer ${this.sessionToken}`;
-    }
-
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      ...options,
-      headers,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`SageGame API Error (${response.status}): ${errorText}`);
-    }
-
-    return response.json() as Promise<T>;
+    this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    const f = options.fetch ?? (globalThis.fetch as FetchLike | undefined);
+    if (!f) throw new Error('No fetch implementation available; pass options.fetch');
+    this.fetchImpl = (input, init) => f(input, init);
   }
 
   public games = {
-    list: async (filter?: GameListFilter): Promise<Game[]> => {
-      const params = new URLSearchParams();
-      if (filter?.category) params.append('category', filter.category);
-      if (filter?.search) params.append('search', filter.search);
-      const queryStr = params.toString() ? `?${params.toString()}` : '';
-      return this.request<Game[]>(`/v1/games${queryStr}`);
-    },
-
-    get: async (gameId: string): Promise<Game> => {
-      return this.request<Game>(`/v1/games/${encodeURIComponent(gameId)}`);
-    },
+    list: (filter: { category?: GameCategory } = {}): Promise<Game[]> =>
+      request<Game[]>(this.fetchImpl, `${this.baseUrl}/v2/games${query({ category: filter.category })}`),
+    get: (gameId: string): Promise<Game> =>
+      request<Game>(this.fetchImpl, `${this.baseUrl}/v2/games/${encodeURIComponent(gameId)}`),
   };
 
-  public sessions = {
-    get: async (sessionId: string): Promise<GameSession> => {
-      return this.request<GameSession>(`/v1/sessions/${encodeURIComponent(sessionId)}`);
-    },
+  public forSession(sessionToken: string): SessionClient {
+    return new SessionClient(this.baseUrl, this.fetchImpl, sessionToken);
+  }
+}
 
-    start: async (sessionId: string): Promise<GameSession> => {
-      return this.request<GameSession>(`/v1/sessions/${encodeURIComponent(sessionId)}/start`, {
-        method: 'POST',
-      });
-    },
+export class SessionClient {
+  constructor(
+    private readonly baseUrl: string,
+    private readonly fetchImpl: FetchLike,
+    private readonly token: string
+  ) {}
 
-    pause: async (sessionId: string): Promise<GameSession> => {
-      return this.request<GameSession>(`/v1/sessions/${encodeURIComponent(sessionId)}/pause`, {
-        method: 'POST',
-      });
-    },
+  private url(sessionId: string, path: string) {
+    return `${this.baseUrl}/v2/sessions/${encodeURIComponent(sessionId)}${path}`;
+  }
 
-    resume: async (sessionId: string): Promise<GameSession> => {
-      return this.request<GameSession>(`/v1/sessions/${encodeURIComponent(sessionId)}/resume`, {
-        method: 'POST',
-      });
-    },
+  play(sessionId: string): Promise<PlayInfo> {
+    return request<PlayInfo>(this.fetchImpl, this.url(sessionId, '/play'), {}, this.token);
+  }
 
-    complete: async <T = Record<string, unknown>>(
-      sessionId: string,
-      resultData: { score: number; duration: number; data?: T }
-    ): Promise<GameResult<T>> => {
-      return this.request<GameResult<T>>(
-        `/v1/sessions/${encodeURIComponent(sessionId)}/complete`,
-        {
-          method: 'POST',
-          body: JSON.stringify(resultData),
-        }
-      );
-    },
+  start(sessionId: string, rulesVersion: number): Promise<PlayInfo> {
+    return request<PlayInfo>(
+      this.fetchImpl,
+      this.url(sessionId, '/start'),
+      { method: 'POST', body: JSON.stringify({ rulesVersion }) },
+      this.token
+    );
+  }
 
-    submitEvent: async (sessionId: string, event: unknown): Promise<{ success: boolean }> => {
-      return this.request<{ success: boolean }>(
-        `/v1/sessions/${encodeURIComponent(sessionId)}/events`,
-        {
-          method: 'POST',
-          body: JSON.stringify(event),
-        }
-      );
-    },
-  };
+  complete<TResult = Record<string, unknown>>(sessionId: string, log: ActionLog): Promise<CompletionResult<TResult>> {
+    return request<CompletionResult<TResult>>(
+      this.fetchImpl,
+      this.url(sessionId, '/complete'),
+      { method: 'POST', body: JSON.stringify({ log }) },
+      this.token
+    );
+  }
 
-  public leaderboards = {
-    get: async (query: LeaderboardQuery = {}): Promise<Leaderboard> => {
-      const params = new URLSearchParams();
-      if (query.gameId) params.append('gameId', query.gameId);
-      if (query.tenantId) params.append('tenantId', query.tenantId);
-      if (query.period) params.append('period', query.period);
-      if (query.scope) params.append('scope', query.scope);
-      if (query.limit) params.append('limit', query.limit.toString());
-      if (query.offset) params.append('offset', query.offset.toString());
-      const queryStr = params.toString() ? `?${params.toString()}` : '';
-
-      const targetGameId = query.gameId ? encodeURIComponent(query.gameId) : 'global';
-      return this.request<Leaderboard>(`/v1/games/${targetGameId}/leaderboard${queryStr}`);
-    },
-  };
-
-  public stats = {
-    get: async (externalUserId: string): Promise<PlayerStats> => {
-      return this.request<PlayerStats>(`/v1/users/${encodeURIComponent(externalUserId)}/stats`);
-    },
-  };
+  leaderboard(sessionId: string, q: LeaderboardQuery = {}): Promise<Leaderboard> {
+    return request<Leaderboard>(
+      this.fetchImpl,
+      this.url(sessionId, `/leaderboard${query({ scope: q.scope, period: q.period, limit: q.limit, offset: q.offset })}`),
+      {},
+      this.token
+    );
+  }
 }

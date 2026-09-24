@@ -1,0 +1,46 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`quiz master > picks questions and option order from the seed 1`] = `
+[
+  [
+    "bank_085",
+    3,
+  ],
+  [
+    "bank_057",
+    0,
+  ],
+  [
+    "bank_114",
+    0,
+  ],
+  [
+    "bank_110",
+    1,
+  ],
+  [
+    "bank_121",
+    3,
+  ],
+  [
+    "bank_109",
+    2,
+  ],
+  [
+    "bank_131",
+    0,
+  ],
+  [
+    "bank_092",
+    3,
+  ],
+  [
+    "bank_075",
+    3,
+  ],
+  [
+    "bank_072",
+    2,
+  ],
+]
+`;

@@ -1,280 +1,222 @@
-# SageGame Developer Guide
+# SageGames developer guide (SDK 2.0)
 
-Welcome to the **SageGame Platform Developer Guide**. This guide is split into two sections:
-1. **Host Developer Integration Guide**: How to integrate SageGame into third-party React Web, React Native, or Expo applications.
-2. **Game Platform Developer Guide**: How to create and register new game modules on the SageGame Platform.
+This guide covers adding SageGames to a React Native / Expo or React web app. You get five playable games — Quiz Master, Memory Match, Sudoku Arena, Word Search and Word Rush — with scores the server verifies, leaderboards and webhooks.
 
----
+For a complete worked integration, see [guides/JAPABUDZ_INTEGRATION.md](guides/JAPABUDZ_INTEGRATION.md).
 
-# Part 1: Host Developer Integration Guide
+## How it fits together
 
-## 1. Installation
-
-Install the SageGame SDK for your target platform:
-
-### For React Web:
-```bash
-npm install @sagegame/react @sagegame/types
+```text
+ Your app                     Your backend                    SageGames API
+ ─────────                    ────────────                    ─────────────
+ GameLauncher ── getSession ─▶ POST /your/games/session ──────▶ POST /v2/sessions  (API key)
+      │                        ◀── { sessionId, sessionToken } ◀──┘
+      │
+      ├── GET  /v2/sessions/:id/play      (session token) → seed + config
+      ├── POST /v2/sessions/:id/start
+      │      … the player plays locally; every move is recorded …
+      └── POST /v2/sessions/:id/complete  { log } → server replays the moves → verified score
+                                                        │
+ Your backend ◀── webhook: session.completed (signed) ──┘
 ```
 
-### For React Native & Expo:
-```bash
-npm install @sagegame/react-native @sagegame/types
-```
+- The **API key** stays on your backend. Your app only ever holds a **session token**, which covers one game and lasts one hour.
+- The app **never reports a score**. It sends the list of moves, and the server replays them with the same game code to compute the score. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
----
+## 1. Get an API key
 
-## 2. Server-to-Server Authentication
+Sign up at `https://<api-host>/portal/`, create an app, choose its games and create a key. See [KEYS_SETUP.md](KEYS_SETUP.md) for key handling and rotation.
 
-Host applications own their users; SageGame owns game execution.
-
-Your Host Application Backend must request a short-lived **Game Session Token** for your authenticated user before launching a game on the client.
-
-### Host Backend Endpoint (`server.ts`):
+## 2. Add a session endpoint to your backend
 
 ```ts
-import express, { Request, Response } from 'express';
-
-const app = express();
-app.use(express.json());
-
-const SAGEGAME_API_URL = 'https://api.sagegame.com';
-const HOST_SECRET_KEY = 'sec_your_host_secret_here';
-
-app.post('/api/create-game-session', async (req: Request, res: Response) => {
-  const { gameId } = req.body;
-  const loggedInUser = { id: 'user_123', name: 'John Doe' };
-
-  const response = await fetch(`${SAGEGAME_API_URL}/v1/sessions`, {
+app.post('/api/games/session', requireUser, async (req, res) => {
+  const r = await fetch(`${process.env.SAGEGAMES_API_URL}/v2/sessions`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${HOST_SECRET_KEY}`,
-    },
+    headers: { Authorization: `Bearer ${process.env.SAGEGAMES_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      gameId: gameId || 'game_quiz_001',
-      externalUserId: loggedInUser.id,
-      metadata: { name: loggedInUser.name },
+      gameId: req.body.gameId,
+      externalUserId: req.user.id,      // your user id
+      displayName: req.user.name,       // shown on leaderboards
+      contextId: req.body.contextId,    // optional: "group:42", "dm:7"… one leaderboard per context
+      config: {},                       // optional per-game settings (see "Game configuration")
     }),
   });
-
-  const sessionData = await response.json();
-  res.json(sessionData); // Returns { sessionId, sessionToken, gameId, expiresAt }
+  const body = await r.json();
+  if (!r.ok) return res.status(502).json({ error: 'Could not start the game' });
+  res.json({ sessionId: body.sessionId, sessionToken: body.sessionToken });
 });
 ```
 
----
+A complete runnable version, including webhook verification, is in [examples/host-backend/server.ts](../examples/host-backend/server.ts).
 
-## 3. Client Integration (React Web & React Native)
+## 3a. React Native / Expo
 
-Wrap your application tree with `<SageGameProvider />` and pass the `sessionToken`:
+```bash
+npm install @sagegames/react-native
+```
+
+No native modules and no Expo config plugin are needed. It works with React Native 0.72+ and React 18/19.
 
 ```tsx
-import React, { useState, useEffect } from 'react';
-import { SageGameProvider, GameCatalog, Game } from '@sagegame/react';
-import { Game as GameMetadata, GameResult } from '@sagegame/types';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { allGames, darkNavyTheme, GameLauncher, SageGameProvider } from '@sagegames/react-native';
 
-export function HostApp() {
-  const [sessionToken, setSessionToken] = useState<string>('');
-  const [selectedGame, setSelectedGame] = useState<GameMetadata | null>(null);
-
-  const fetchSession = async (gameId: string) => {
-    const res = await fetch('/api/create-game-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ gameId }),
-    });
-    const data = await res.json();
-    setSessionToken(data.sessionToken);
-  };
-
-  const handleSelectGame = (game: GameMetadata) => {
-    setSelectedGame(game);
-    fetchSession(game.id);
-  };
-
-  const handleGameComplete = (result: GameResult) => {
-    console.log('Game finished! Score:', result.score);
-    alert(`Congratulations! You scored ${result.score} points.`);
-    setSelectedGame(null);
-  };
-
+export function Root() {
   return (
-    <SageGameProvider baseUrl="https://api.sagegame.com" sessionToken={sessionToken}>
-      {!selectedGame ? (
-        <GameCatalog onSelectGame={handleSelectGame} />
-      ) : (
-        <Game gameId={selectedGame.id} onComplete={handleGameComplete} />
-      )}
+    <SageGameProvider games={allGames} baseUrl="https://sage-game-platform.onrender.com" theme={darkNavyTheme} pendingStore={AsyncStorage}>
+      <Navigation />
     </SageGameProvider>
+  );
+}
+
+export function PlayScreen({ gameId, onDone }: { gameId: string; onDone: () => void }) {
+  return (
+    <GameLauncher
+      getSession={() => api.post('/api/games/session', { gameId }).then((r) => r.data)}
+      onComplete={(result) => console.log('verified', result.score, result.rank)}
+      onClose={onDone}
+    />
   );
 }
 ```
 
----
+## 3b. React (web)
 
-## 4. Configuring Word Search & Custom Categories
-
-For **Word Search** (`game_word_search_001`), host applications can dynamically configure categories, custom word tokens, definitions, and word selection modes via `config`:
+```bash
+npm install @sagegames/react
+```
 
 ```tsx
-<Game
-  gameId="game_word_search_001"
-  config={{
-    categoryName: "Immigration & Legal Terms",
-    difficulty: "medium", // 'easy' | 'medium' | 'hard'
-    gridSize: 12,
-    wordSelectionMode: "combine", // 'custom_only' | 'default_only' | 'combine'
-    words: [
-      { token: "VISA", display: "Visa", definition: "Conditional authorization document" },
-      { token: "PERMIT", display: "Permit", definition: "Official permit document" },
-      { token: "RIGHTS", display: "Rights", definition: "Legal entitlements" },
-      { token: "STATUTE", display: "Statute", definition: "Written law" }
-    ]
-  }}
-  onComplete={(result) => {
-    console.log('Word Search Result:', result.data);
-    // result.data contains { wordsFound, totalWords, accuracy, categoryName }
-  }}
-/>
+import { allGames, GameLauncher, lightTheme, SageGameProvider } from '@sagegames/react';
+
+<SageGameProvider games={allGames} baseUrl="https://sage-game-platform.onrender.com" theme={lightTheme} pendingStore={window.localStorage}>
+  <GameLauncher getSession={() => startSession('game_sudoku_001')} onClose={close} />
+</SageGameProvider>
 ```
 
----
+The web views use the DOM, not react-native-web. Grids use CSS grid, drags use pointer events, and Sudoku can be played with the keyboard (arrow keys, digits, Backspace, and N for notes).
 
-## 5. Configuring Sudoku & Variants
+## Components and hooks
 
-For **Sudoku** (`game_sudoku_001`), host applications can choose grid variants and difficulty presets:
+The same API is exported by `@sagegames/react-native` and `@sagegames/react`.
 
-```tsx
-<Game
-  gameId="game_sudoku_001"
-  config={{
-    variant: "7x7_irregular", // '4x4' | '6x6' | '5x5_irregular' | '7x7_irregular' | '9x9'
-    difficulty: "medium"       // 'easy' | 'medium' | 'hard'
-  }}
-  onComplete={(result) => {
-    console.log('Sudoku Completed in:', result.duration, 'seconds');
-  }}
-/>
-```
+| Export | What it does |
+| --- | --- |
+| `SageGameProvider` | Required at the root. Props: `games` (usually `allGames`), `baseUrl`, `theme`, `themeOverrides`, `labels`, `pendingStore`, `fetch`. |
+| `GameLauncher` | The whole flow: intro → game → verified result + leaderboard, with pause, quit, retries and "Play again". Props: `getSession` (preferred) or `session`, `onComplete`, `onError`, `onEvent`, `onClose`, `autoStart`, `showLeaderboard`, `renderHeader`, `hideChrome`. |
+| `GameCatalog` | List of games the app can play. `onSelectGame(game)`. |
+| `GamePreview` | Plays a game locally with no session, for demos and tutorials. Scores aren't submitted. |
+| `LeaderboardList` / `useLeaderboard(session, { scope })` | Leaderboard for a session's context (`scope: 'context'`, the default) or the whole app (`'game'`). |
+| `useLauncher(options)` | Build your own launcher UI on top of the same flow. |
+| `useGames()` | Catalog data. |
+| `allGames`, `quizMaster`, `memoryMatch`, `sudoku`, `wordSearch`, `wordRush` | Game plugins (rules + view). Pass a subset to `games` to offer fewer games. |
 
----
-
-# Part 2: Game Platform Developer Guide
-
-This section explains how platform developers build and register **new game modules** on SageGame.
-
-## 1. Implementing the `GameModule` Contract
-
-Every game module in `games/<game-name>` must implement `GameModule<TConfig, TAction, TState, TResult>`:
-
-```ts
-import {
-  GameAction,
-  GameContext,
-  GameModule,
-  GameResult,
-  GameState
-} from '@sagegame/types';
-
-export interface MyGameConfig {
-  difficulty?: string;
-}
-
-export interface MyGameResultData {
-  customScoreMultiplier: number;
-}
-
-export class MyCustomGameModule
-  implements GameModule<MyGameConfig, GameAction, GameState, GameResult<MyGameResultData>>
-{
-  public readonly id = 'game_custom_001';
-  private context?: GameContext<MyGameConfig>;
-  private status: 'idle' | 'running' | 'paused' | 'ended' = 'idle';
-  private score = 0;
-
-  public async initialize(context: GameContext<MyGameConfig>): Promise<void> {
-    this.context = context;
-    this.status = 'idle';
-    this.score = 0;
-  }
-
-  public async start(): Promise<void> {
-    this.status = 'running';
-  }
-
-  public async pause(): Promise<void> {
-    this.status = 'paused';
-  }
-
-  public async resume(): Promise<void> {
-    this.status = 'running';
-  }
-
-  public async submitAction(action: GameAction): Promise<void> {
-    if (this.status !== 'running') return;
-
-    if (action.type === 'PLAYER_MOVE') {
-      this.score += 100;
-      this.context?.onEvent({
-        type: 'game_score_updated',
-        sessionId: this.context.sessionId,
-        gameId: this.id,
-        timestamp: new Date().toISOString(),
-        currentScore: this.score,
-        delta: 100,
-      });
-    }
-  }
-
-  public getState(): GameState {
-    return {
-      sessionId: this.context?.sessionId || '',
-      status: this.status,
-      currentScore: this.score,
-      elapsedSeconds: 0,
-      data: {},
-    };
-  }
-
-  public async complete(): Promise<GameResult<MyGameResultData>> {
-    this.status = 'ended';
-    return {
-      sessionId: this.context?.sessionId || '',
-      gameId: this.id,
-      externalUserId: this.context?.externalUserId || '',
-      score: this.score,
-      duration: 30,
-      completedAt: new Date().toISOString(),
-      data: { customScoreMultiplier: 1.5 },
-    };
-  }
-
-  public async destroy(): Promise<void> {
-    this.status = 'ended';
-  }
-}
-```
-
----
-
-## 2. Registering New Games in Platform API
-
-Add your game metadata to `mockGames` in [`services/api/src/server.ts`](file:///c:/Users/ahmed/OneDrive/Documents/Sage/Sage%20Analytix/sage-game-platform/services/api/src/server.ts):
+`GameLauncher` calls `onComplete` **once**, with the server's result:
 
 ```ts
 {
-  id: 'game_custom_001',
-  slug: 'my-custom-game',
-  name: 'My Custom Game',
-  description: 'An exciting new interactive game on SageGame platform.',
-  version: '1.0.0',
-  category: 'puzzle',
-  status: 'published',
-  deliveryModel: 'sdk_rendered',
-  supportedPlatforms: ['web', 'ios', 'android'],
-  thumbnail: 'https://example.com/thumb.jpg',
+  sessionId, gameId,
+  status: 'verified' | 'rejected',
+  valid: boolean,          // counts on leaderboards
+  score, durationMs, rank, // rank within the session's context
+  result,                  // game-specific stats (e.g. { wordsFound, totalWords })
+  flags,                   // plausibility flags, if any
 }
 ```
 
-Register the module instance in `<SageGameProvider modules={[new MyCustomGameModule()]} />` or client module map.
+`onEvent` also reports `loaded`, `started`, `paused`, `resumed`, `ended`, `completed` and `error` for analytics.
+
+### Reliability
+
+- **Network drops at the end of a game.** The result is retried with backoff. With a `pendingStore` (AsyncStorage or localStorage), an unsent result survives the app closing and is submitted the next time that session loads.
+- **App backgrounded or tab hidden.** Games that allow pausing (Memory, Sudoku, Word Search) pause. Timed games (Quiz, Word Rush) keep running, and if time runs out while away, the game ends normally and the result still verifies.
+- **Outdated app.** If the server has newer game rules than the SDK, the launcher shows "Please update the app" instead of a broken game.
+
+## Theming and labels
+
+Start from `lightTheme` or `darkNavyTheme` and override anything:
+
+```tsx
+<SageGameProvider
+  games={allGames}
+  theme={darkNavyTheme}
+  themeOverrides={{
+    colors: { primary: '#BA8109', background: '#000B21' },
+    radii: { md: 12 },
+    fonts: { regular: 'Montserrat-Regular', medium: 'Montserrat-SemiBold', bold: 'Montserrat-Bold' },
+  }}
+  labels={{ play: 'Start', yourScore: 'Your points' }}
+/>
+```
+
+The colour tokens are `background`, `surface`, `surfaceAlt`, `border`, `text`, `textMuted`, `primary`, `onPrimary`, `success`, `danger`, `warning`, `highlight`, `cellSelected`, `cellPeer` and `cellConflict`. Every user-facing string is in `labels`; see `defaultLabels` for the full list.
+
+Keep `themeOverrides` and `labels` outside render, or memoise them.
+
+## Game configuration
+
+Send `config` when creating a session, or set per-app defaults on the platform. The server validates it and answers `400 invalid_config` with the offending field.
+
+| Game (`gameId`) | Config |
+| --- | --- |
+| Quiz Master (`game_quiz_001`) | `questionCount` (1–50, default 10), `timePerQuestionSec` (5–120, default 20), `difficulty` (`easy`/`medium`/`hard`/`mixed`), `categories` (`general`, `science`, `geography`, `history`, `technology`, `sports`, `travel`, `maths`, `culture`), `questions` (your own, see below), `includeDefaultQuestions`, `bankId` |
+| Memory Match (`game_memory_001`) | `pairCount` (2–12, default 6) |
+| Sudoku Arena (`game_sudoku_001`) | `variant` (`4x4`, `4x4_irregular`, `5x5_irregular`, `6x6`, `6x6_irregular`, `7x7_irregular`, `8x8`, `8x8_irregular`, `9x9`), `difficulty`, `timeLimitSeconds` (0 = none) |
+| Word Search (`game_word_search_001`) | `words: [{ token, display?, definition? }]` (up to 30), `wordSelectionMode` (`custom_only`/`default_only`/`combine`), `categoryName`, `gridSize` (6–15; grows to fit the longest word), `difficulty` (hard adds backwards and diagonal words) |
+| Word Rush (`game_word_001`) | `size` (4 or 5), `durationSeconds` (30–300, default 90) |
+
+**Custom quiz questions.** Send them inline:
+
+```json
+{ "questions": [{ "question": "What does BRP stand for?", "answer": "Biometric Residence Permit", "wrong": ["British Rail Pass", "Border Return Paper"] }] }
+```
+
+Or store a bank once and refer to it by id:
+
+```bash
+curl -X PUT $API/v2/quiz-banks/relocation -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"name":"Relocation","questions":[…]}'
+# then create sessions with  "config": { "bankId": "relocation" }
+```
+
+## Server API for your backend (API key)
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v2/sessions` | Start a game (see above). |
+| `GET /v2/sessions/:id` | Session status, metadata and verified result. |
+| `GET /v2/results?externalUserId=&gameId=&contextId=&since=&limit=` | Recent results, for rewards and history. |
+| `GET /v2/leaderboards/:gameId?contextId=&period=all_time\|daily\|weekly\|monthly&limit=&offset=` | Best verified score per player. |
+| `GET /v2/users/:externalUserId/stats` | Totals and per-game stats. |
+| `PUT/GET/DELETE /v2/quiz-banks/:bankId`, `GET /v2/quiz-banks` | Custom question banks. |
+| `GET /v2/games` | Catalog (public; with a key, only your app's games). |
+
+Webhooks (`session.completed`) are signed with `Sage-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">`. Verify the signature against the raw body. The example backend has a ready-made verifier.
+
+**v1:** `/v1/*` still works for SDK 1.x apps, but its client-reported scores are stored as unverified and never ranked. Move to v2.
+
+## Local development
+
+```bash
+npm install --include=dev --legacy-peer-deps
+npm run build            # all packages, the API and the portal
+npm test                 # engine, games, API (on PGlite) and SDK↔API tests — offline
+npm run playground       # http://localhost:5199 — the real game screens in a browser
+npm run test:ui          # with the playground running: plays every game with clicks/drags/taps
+```
+
+Playground URLs:
+
+- `?view=memory|quiz|sudoku|wordsearch|wordrush` shows one game.
+- `?view=launcher&game=game_memory_001` runs the full launcher against a mock server that replays moves with the real engine.
+- Add `&sdk=web` for the web SDK and `&theme=light` for the light theme.
+
+The React Native views run in the playground through react-native-web, so you can check a layout change without a phone.
+
+## Upgrading from 1.x
+
+- Replace `<Game>` and the old `<GameLauncher sessionToken>` with `<GameLauncher getSession={…}>`.
+- Pass `games={allGames}` to the provider. The game packages are bundled, so you no longer install them separately.
+- Stop sending a host secret from the app. Create sessions on your backend.
+- The old hooks `useGameSession`, `useGameState` and `useGameResult` and the old `GameModule` contract are gone.
