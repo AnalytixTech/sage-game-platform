@@ -167,6 +167,8 @@ export interface WordSearchResult {
   accuracy: number;
   completedInSeconds: number;
   categoryName: string;
+  /** Configured words that could not be placed on the grid (too long or no space). */
+  skippedWords?: string[];
 }
 
 export type SudokuVariantId =
@@ -192,6 +194,8 @@ export interface SudokuResult {
   mistakesCount: number;
   hintsUsed: number;
   completedInSeconds: number;
+  /** True when the puzzle was fully solved (not timed out or quit). */
+  solved?: boolean;
 }
 
 /**
@@ -378,3 +382,5 @@ export interface WebhookPayload<TPayload = unknown> {
   payload: TPayload;
   signature: string;
 }
+
+export * from './rules';

@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`word search > places every word letter-for-letter on the grid, deterministically 1`] = `
+[
+  "CYSSVIPGLMC",
+  "PHOEIMUXIIA",
+  "ASLASMZBKWM",
+  "WAVRAIZLKOP",
+  "OGECKGLEVRU",
+  "LERHMRETDDS",
+  "SCHOLARSHIP",
+  "TFUPCTATVMN",
+  "RRUSHIQGAME",
+  "PLATFORMGHP",
+  "VNXORNDGAXC",
+]
+`;

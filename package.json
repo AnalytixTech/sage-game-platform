@@ -11,12 +11,22 @@
   ],
   "scripts": {
     "build": "tsc --build",
-    "clean": "tsc --build --clean"
+    "clean": "tsc --build --clean",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:dictionary": "node games/word-rush/scripts/build-dictionary.js"
   },
   "dependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.0",
     "typescript": "^5.3.3"
+  },
+  "devDependencies": {
+    "@types/react-native": "^0.73.0",
+    "an-array-of-english-words": "^2.0.0",
+    "fast-check": "^4.10.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
   }
 }

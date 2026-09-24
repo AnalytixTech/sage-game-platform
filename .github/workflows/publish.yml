@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install Monorepo Dependencies
@@ -28,6 +28,9 @@ jobs:
 
       - name: Build All Monorepo Packages
         run: npm run build
+
+      - name: Test
+        run: npm test
 
       # Private workspaces (services, examples) are skipped. Versions already on npm are skipped
       # instead of failing the job.

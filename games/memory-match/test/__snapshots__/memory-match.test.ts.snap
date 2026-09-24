@@ -1,0 +1,18 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`memory match > keeps the same deck for a fixed seed (bump rulesVersion if this changes) 1`] = `
+[
+  "🐯",
+  "🐵",
+  "🐻",
+  "🐯",
+  "🦉",
+  "🐵",
+  "🐻",
+  "🦉",
+  "🐙",
+  "🐙",
+  "🐮",
+  "🐮",
+]
+`;

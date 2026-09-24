@@ -8,6 +8,10 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@sagegames/engine": "1.0.0",
     "@sagegames/types": "1.0.0"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }

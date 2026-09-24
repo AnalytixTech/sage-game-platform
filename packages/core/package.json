@@ -8,7 +8,8 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@sagegames/types": "1.0.0"
+    "@sagegames/types": "1.0.0",
+    "@sagegames/engine": "1.0.0"
   },
   "keywords": [
     "sagegames",

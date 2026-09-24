@@ -58,7 +58,7 @@ export const GameCatalog: React.FC<RNGameCatalogProps> = ({ onSelectGame, catego
     );
   }
 
-  return React.createElement(FlatList, {
+  return React.createElement(FlatList<GameMetadata>, {
     data: games,
     keyExtractor: (item: GameMetadata) => item.id,
     contentContainerStyle: styles.listContent,
