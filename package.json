@@ -17,7 +17,10 @@
     "build:dictionary": "node games/word-rush/scripts/build-dictionary.js",
     "build:packages": "tsc --build",
     "db:push": "supabase db push",
-    "db:new": "supabase migration new"
+    "db:new": "supabase migration new",
+    "playground": "vite --config tools/playground/vite.config.ts",
+    "test:ui": "node tools/playground/play.mjs .ui-shots/native && node tools/playground/play.mjs .ui-shots/web sdk=web",
+    "typecheck:examples": "tsc -p tools/playground/tsconfig.examples.json"
   },
   "dependencies": {
     "@types/express": "^4.17.21",
@@ -26,9 +29,12 @@
     "typescript": "^5.3.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react-native": "^0.73.0",
     "an-array-of-english-words": "^2.0.0",
     "fast-check": "^4.10.2",
+    "playwright": "^1.63.0",
+    "react-native-web": "^0.21.2",
     "supabase": "^2.117.0",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"

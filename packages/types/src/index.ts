@@ -88,26 +88,6 @@ export interface CreateSessionResponse {
 }
 
 /**
- * Standard Game Action wrapper
- */
-export interface GameAction<TType extends string = string, TPayload = unknown> {
-  type: TType;
-  payload: TPayload;
-  timestamp: number;
-}
-
-/**
- * Standard Game State representation
- */
-export interface GameState<TData = unknown> {
-  sessionId: string;
-  status: 'idle' | 'running' | 'paused' | 'ended';
-  currentScore: number;
-  elapsedSeconds: number;
-  data: TData;
-}
-
-/**
  * Generic Game Result payload returned upon game completion
  */
 export interface GameResult<TDetails = Record<string, unknown>> {
@@ -199,129 +179,10 @@ export interface SudokuResult {
 }
 
 /**
- * Standard Platform Events
- */
-export type GameEventType =
-  | 'game_started'
-  | 'game_paused'
-  | 'game_resumed'
-  | 'game_progress'
-  | 'game_score_updated'
-  | 'game_completed'
-  | 'game_error'
-  | 'custom';
-
-export interface BaseGameEvent {
-  type: GameEventType;
-  sessionId: string;
-  gameId: string;
-  timestamp: string;
-}
-
-export interface GameStartedEvent extends BaseGameEvent {
-  type: 'game_started';
-}
-
-export interface GamePausedEvent extends BaseGameEvent {
-  type: 'game_paused';
-}
-
-export interface GameResumedEvent extends BaseGameEvent {
-  type: 'game_resumed';
-}
-
-export interface GameProgressEvent<TState = unknown> extends BaseGameEvent {
-  type: 'game_progress';
-  progressPercentage: number;
-  stateSnapshot?: TState;
-}
-
-export interface GameScoreUpdatedEvent extends BaseGameEvent {
-  type: 'game_score_updated';
-  currentScore: number;
-  delta: number;
-}
-
-export interface GameCompletedEvent<TResult = unknown> extends BaseGameEvent {
-  type: 'game_completed';
-  result: GameResult<TResult>;
-}
-
-export interface GameErrorEvent extends BaseGameEvent {
-  type: 'game_error';
-  error: {
-    code: string;
-    message: string;
-    details?: unknown;
-  };
-}
-
-export interface CustomGameEvent<TPayload = unknown> extends BaseGameEvent {
-  type: 'custom';
-  customType: string;
-  payload: TPayload;
-}
-
-export type GameEventMap = {
-  game_started: GameStartedEvent;
-  game_paused: GamePausedEvent;
-  game_resumed: GameResumedEvent;
-  game_progress: GameProgressEvent;
-  game_score_updated: GameScoreUpdatedEvent;
-  game_completed: GameCompletedEvent;
-  game_error: GameErrorEvent;
-  custom: CustomGameEvent;
-};
-
-export type GameEvent = GameEventMap[keyof GameEventMap];
-
-/**
- * Lifecycle Context passed into Game Modules
- */
-export interface GameContext<TConfig = Record<string, unknown>> {
-  sessionId: string;
-  gameId: string;
-  externalUserId: string;
-  platform: Platform;
-  config: TConfig;
-  sessionToken: string;
-  onEvent: (event: GameEvent) => void;
-}
-
-/**
- * Platform Contract for every Game Module
- */
-export interface GameModule<
-  TConfig = Record<string, unknown>,
-  TAction = GameAction,
-  TState = GameState,
-  TResult = GameResult
-> {
-  id: string;
-  initialize(context: GameContext<TConfig>): Promise<void>;
-  start(): Promise<void>;
-  pause(): Promise<void>;
-  resume(): Promise<void>;
-  submitAction(action: TAction): Promise<void>;
-  getState(): TState;
-  complete(): Promise<TResult>;
-  destroy(): Promise<void>;
-}
-
-/**
  * Leaderboard Specs
  */
 export type LeaderboardPeriod = 'all_time' | 'daily' | 'weekly' | 'monthly';
 export type LeaderboardScope = 'global' | 'tenant' | 'game';
-
-export interface LeaderboardQuery {
-  gameId?: string;
-  tenantId?: string;
-  period?: LeaderboardPeriod;
-  scope?: LeaderboardScope;
-  limit?: number;
-  offset?: number;
-}
 
 export interface LeaderboardEntry {
   rank: number;
@@ -334,6 +195,7 @@ export interface LeaderboardEntry {
 
 export interface Leaderboard {
   gameId?: string;
+  contextId?: string;
   period: LeaderboardPeriod;
   entries: LeaderboardEntry[];
   totalPlayers: number;
@@ -362,25 +224,34 @@ export interface PlayerStats {
 }
 
 /**
- * Webhooks
+ * Webhooks: POSTed to the tenant's webhook URL with a Sage-Signature header
+ * (t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" keyed with the webhook secret>).
  */
-export type WebhookEventType =
-  | 'game.session.created'
-  | 'game.session.started'
-  | 'game.session.completed'
-  | 'game.result.created'
-  | 'game.session.expired';
+export type WebhookEventType = 'session.completed' | 'match.finished';
 
-export interface WebhookPayload<TPayload = unknown> {
+export interface WebhookEnvelope<TData = unknown> {
   id: string;
-  event: WebhookEventType;
+  type: WebhookEventType;
   tenantId: string;
-  externalUserId: string;
-  gameId: string;
+  createdAt: string;
+  data: TData;
+}
+
+export interface SessionCompletedData {
   sessionId: string;
-  timestamp: string;
-  payload: TPayload;
-  signature: string;
+  gameId: string;
+  externalUserId: string;
+  displayName: string | null;
+  contextId: string | null;
+  status: 'verified' | 'rejected';
+  valid: boolean;
+  score: number;
+  durationMs: number;
+  result: Record<string, unknown>;
+  flags: string[];
+  rejectCode: string | null;
+  completedAt: string;
 }
 
 export * from './rules';
+export * from './api';

@@ -2,16 +2,16 @@
 
 exports[`word search > places every word letter-for-letter on the grid, deterministically 1`] = `
 [
-  "CYSSVIPGLMC",
-  "PHOEIMUXIIA",
-  "ASLASMZBKWM",
-  "WAVRAIZLKOP",
-  "OGECKGLEVRU",
-  "LERHMRETDDS",
-  "SCHOLARSHIP",
-  "TFUPCTATVMN",
-  "RRUSHIQGAME",
-  "PLATFORMGHP",
-  "VNXORNDGAXC",
+  "PFFPSIVISAS",
+  "ABWLCMLZWSE",
+  "SHPAHMCSVOA",
+  "SHUTOIAQPLR",
+  "PVZFLGMRGVC",
+  "OWZOARPUAEH",
+  "ROLRRAUSMRE",
+  "TREMSTSHEGH",
+  "YDZMHISOARU",
+  "BRZNIOFSNQF",
+  "EYZNPNZNNKN",
 ]
 `;

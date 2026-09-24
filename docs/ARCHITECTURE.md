@@ -1,306 +1,92 @@
-# SageGame Platform Architecture & Deliverables Documentation
+# SageGames architecture
 
-SageGame is a type-safe multi-tenant, multi-game Game-as-a-Service (GaaS) platform allowing third-party host applications to embed games seamlessly into React Web, React Native, and Expo applications.
+SageGames lets host apps (for example Japabudz) embed casual games with scores the server can verify. Host apps own their users; the platform owns game rules, sessions, verification, leaderboards and webhooks.
 
----
+## Packages
 
-## 1. Complete System Architecture
+| Package | Contents | Runs on |
+| --- | --- | --- |
+| `@sagegames/types` | Shared types: the `GameRules` contract, action logs, API responses | everywhere |
+| `@sagegames/engine` | Seeded random generator, the `Play` loop, action-log parsing, `replay()` | client **and** server |
+| `@sagegames/game-*` (5 games) | Each game's rules as a pure reducer, plus its content (question bank, dictionary, dice, Sudoku variants) | client **and** server |
+| `@sagegames/core` | HTTP client, `GameRuntime` (plays a game and records moves), `SessionController` (session → play → submit → result) | client |
+| `@sagegames/react-headless` | Provider, theme, labels, `useLauncher`, and interaction hooks for each game | React (web and native) |
+| `@sagegames/react-native` | React Native views, launcher, results, leaderboard | iOS / Android / Expo |
+| `@sagegames/react` | DOM views, launcher, results, leaderboard | web |
+| `services/api` | Express API: sessions, replay, leaderboards, portal API, webhooks | Render |
+| `services/portal` | Developer portal (React + Vite, Supabase Auth), served at `/portal` | Render |
+| `supabase/` | Database migrations and Auth settings | Supabase |
 
-```text
-                               SAGEGAME PLATFORM
-                                       │
-                              ┌────────┴────────┐
-                              │   Platform API  │
-                              └────────┬────────┘
-                                       │
-              ┌────────────────────────┼────────────────────────┐
-              │                        │                        │
-          Game Engine              Game Engine              Game Engine
-              │                        │                        │
-          Quiz Master              Word Rush               Memory Match
-              │                        │                        │
-              └────────────────────────┼────────────────────────┘
-                                       │
-                                SDK Core / Types
-                                       │
-                  ┌────────────────────┴────────────────────┐
-                  │                                         │
-            React SDK (@sagegame/react)          React Native SDK (@sagegame/react-native)
-                  │                                         │
-             Web Applications                         Mobile / Expo Apps
-```
+Game packages contain no React code, so the API imports exactly the same rules the SDK plays with.
 
----
-
-## 2. Multi-Tenant Architecture
-
-- **Host App Ownership**: The Host Application owns user identity and authentication.
-- **Platform Ownership**: SageGame Platform owns game execution, game state, scoring, and leaderboards.
-- **Tenant Isolation**: Every API request and session token is bound to a specific `tenantId`. A host application can only query games enabled for its tenant (`tenant_game_access`).
-
----
-
-## 3. Multi-Game Architecture
-
-SageGame supports adding new games without modifying the SDK. Games are decoupled from core platform logic and implement the universal `GameModule` interface.
-
-Supported game categories:
-- Quiz games (`Quiz Master`)
-- Word games (`Word Rush`)
-- Memory games (`Memory Match`)
-- Puzzle, Arcade, Multiplayer, and future games.
-
----
-
-## 4. Monorepo Structure
+## Trust model: scores come from a replay, never from the client
 
 ```text
-sage-game-platform/
-├── package.json
-├── tsconfig.json
-├── packages/
-│   ├── types/               # @sagegame/types (TypeScript Interfaces & Contracts)
-│   ├── core/                # @sagegame/core (Client, Event Emitter, Session Engine, Registry)
-│   ├── react/               # @sagegame/react (Web React SDK, Components, Hooks)
-│   └── react-native/        # @sagegame/react-native (Mobile RN & Expo SDK)
-├── games/
-│   ├── quiz-master/         # @sagegame/game-quiz-master
-│   ├── word-rush/           # @sagegame/game-word-rush
-│   └── memory-match/        # @sagegame/game-memory-match
-├── services/
-│   └── api/                 # @sagegame/api-service (Express REST API Server & DB Schema)
-├── examples/
-│   ├── host-backend/        # Host Server acquiring session tokens with Host Secret
-│   ├── react-web-app/       # React Web App integration example
-│   └── react-native-app/    # React Native / Expo App integration example
-└── docs/
-    └── ARCHITECTURE.md      # Comprehensive Architectural Specs
+ POST /v2/sessions (host, API key)  →  server picks a random seed, validates config, stores both
+ GET  /play       (session token)   →  { seed, config, rulesVersion }
+      client: state = rules.init(seed, config); each move → Play.apply(t, move); records [t, type, payload]
+ POST /complete   { log }            →  server: replay(rules, { seed, config, log, serverElapsedMs })
+                                         → authoritative score, stored once; leaderboard; webhook
 ```
 
----
+- **Determinism.** Rules are pure reducers that take time as an argument and get randomness only from the seed (cyrb128 → sfc32, 32-bit integer maths). The same seed and moves produce the same state in V8, Hermes and Node. Golden-value tests guard against drift.
+- **One loop, two places.** The client (`GameRuntime`) and the server (`replay`) both drive the engine's `Play` class. Pauses are handled there: rules only ever see active play time. Timer transitions are composable, so ticks the client never logged still replay identically; a property test checks this.
+- **Hard rejects** (the result is stored as `rejected`, never ranked):
+  - a malformed log
+  - timestamps going backwards
+  - unknown or malformed moves
+  - more moves than the game's limit
+  - a log claiming more time than the server saw pass since `/start`
+  - a game or rules-version mismatch
+- **Soft flags** (the result is stored, but not ranked): moves faster than a human could make, a compressed timeline, and game-specific checks such as a perfect quiz answered in under 0.8 s per question.
+- **Time limits end games; they don't reject them.** An app backgrounded past a timer still verifies, capped at the limit.
+- **Limits.** The server's replay makes it impossible to *invent* a score. It can't stop a modified client from reading the puzzle from memory, since the seed and state are on the device, and playing it perfectly. Plausibility flags catch the obvious cases; server-revealed hidden information (a later phase) closes the rest for battles.
 
-## 5. SDK Package Structure
+### Rules versions
 
-- `@sagegame/types`: Complete type declarations.
-- `@sagegame/core`: Platform HTTP client, typed event emitter, game lifecycle state machine.
-- `@sagegame/react`: Context provider, React components (`<GameCatalog />`, `<GameLauncher />`, `<Game />`), custom hooks (`useGames()`, `useGame()`, `useGameSession()`, `useGameState()`, `useGameResult()`).
-- `@sagegame/react-native`: Cross-platform mobile UI adapters for React Native and Expo.
+Every session records the `rulesVersion` of its game. Anything that changes how a seed plays requires bumping `rulesVersion` in that game's `rules.ts` and releasing a new SDK. That includes the question bank, the dictionary, generation and scoring. Snapshot tests fail when a fixed seed's puzzle changes, as a reminder.
 
----
+An SDK whose version differs from the server's gets `426 sdk_update_required`, and the launcher asks the player to update the app.
 
-## 6. Game Registry Design
-
-`GameRegistry` maintains game metadata:
-
-```ts
-export interface Game<TConfig = Record<string, unknown>> {
-  id: string;
-  slug: string;
-  name: string;
-  description?: string;
-  version: string;
-  category: GameCategory;
-  status: GameStatus;
-  deliveryModel: GameDeliveryModel; // 'sdk_rendered' | 'remote_embedded'
-  supportedPlatforms: Platform[];   // 'web' | 'ios' | 'android'
-  configuration?: TConfig;
-}
-```
-
----
-
-## 7. Game Module Contract
-
-Every game module implements `GameModule`:
-
-```ts
-export interface GameModule<
-  TConfig = Record<string, unknown>,
-  TAction = GameAction,
-  TState = GameState,
-  TResult = GameResult
-> {
-  id: string;
-  initialize(context: GameContext<TConfig>): Promise<void>;
-  start(): Promise<void>;
-  pause(): Promise<void>;
-  resume(): Promise<void>;
-  submitAction(action: TAction): Promise<void>;
-  getState(): TState;
-  complete(): Promise<TResult>;
-  destroy(): Promise<void>;
-}
-```
-
----
-
-## 8. React SDK API
-
-```tsx
-import { SageGameProvider, GameCatalog, Game } from '@sagegame/react';
-
-function App() {
-  return (
-    <SageGameProvider sessionToken={token}>
-      <GameCatalog onSelectGame={handleSelect} />
-      <Game gameId="game_quiz_001" onComplete={handleComplete} />
-    </SageGameProvider>
-  );
-}
-```
-
-Hooks:
-- `useGames({ category })`
-- `useGame(gameId)`
-- `useGameSession(sessionId)`
-- `useGameState()`
-- `useGameResult()`
-
----
-
-## 9. React Native SDK API
-
-```tsx
-import { SageGameProvider, GameCatalog, Game } from '@sagegame/react-native';
-
-function MobileApp() {
-  return (
-    <SageGameProvider sessionToken={token}>
-      <GameCatalog onSelectGame={handleSelect} />
-      <Game gameId="game_quiz_001" onComplete={handleComplete} />
-    </SageGameProvider>
-  );
-}
-```
-
----
-
-## 10. Authentication Flow
+## Data (Supabase Postgres, `sagegames` schema)
 
 ```text
-Host App User ──> Host Backend ──[POST /v1/sessions (Secret Key)]──> SageGame API
-                      │                                                   │
-                      └──────────── Session Token (Short-lived) ──────────┘
-                                                │
-                                                ▼
-                                         Client SDK
+tenants ─┬─ tenant_members ── auth.users        (portal accounts, Supabase Auth)
+         ├─ api_keys                            (sk_live_/sk_test_, HMAC-SHA256 + pepper)
+         ├─ tenant_game_access ── games         (enabled games + per-app default config)
+         ├─ quiz_banks
+         ├─ game_sessions ─┬─ session_logs      (the submitted move log + hash)
+         │                 └─ game_results      (verified/rejected, score, flags, is_valid)
+         ├─ player_stats
+         └─ webhook_deliveries                  (outbox, retried with backoff)
 ```
 
-1. Host Backend calls `POST /v1/sessions` with `Authorization: Bearer HOST_APPLICATION_SECRET`.
-2. SageGame API returns short-lived `sessionToken`.
-3. Client app passes `sessionToken` to `<SageGameProvider sessionToken={token}>`.
-4. Permanent secrets are **NEVER** embedded in client code.
+- The schema isn't exposed to Supabase's Data API, and RLS is enabled with no policies. Only the API, connecting as the owner, touches it.
+- Leaderboards are computed from `game_results`: each player's best valid score, ranked with `RANK()`, filtered by tenant, game, period and `context_id`. Hosts use `context_id` for per-chat or per-group boards.
+- Completion is one transaction. It locks the session with `FOR UPDATE`, is idempotent for the same log hash, and refuses a second, different log.
 
----
+## Credentials
 
-## 11. Session Lifecycle
+| Credential | Holder | Scope |
+| --- | --- | --- |
+| API key `sk_live_…` / `sk_test_…` | host backend | create sessions, read results, leaderboards and stats for its own app |
+| Session token `stk_…` | player's app | one session: play, start, complete, and that session's leaderboard; 1 hour |
+| Supabase access token | developer in the portal | manage apps they belong to |
+| Webhook secret `whsec_…` | host backend | verify `Sage-Signature` |
 
-Session States:
-`created` ──> `active` ──> `paused` ──> `completed` / `expired` / `terminated`
+Keys and session tokens are stored only as hashes. Test-key results never reach leaderboards or webhooks.
 
-- Heartbeats monitor token expiration.
-- Upon completion, final scores are submitted to `POST /v1/sessions/:sessionId/complete`.
+## Runtime
 
----
+- The API runs on Render (Node 22). On startup it checks the schema exists, syncs the catalog from code, creates any bootstrap tenants, and starts the webhook worker, which polls the outbox every 5 s.
+- Rate limits: per API key on host routes, per IP on player routes, and stricter on `/complete` and key creation.
+- CORS is open on `/v1` and `/v2`, which use bearer tokens only, and closed on the portal API.
 
-## 12. API Specification
+## Testing
 
-- `GET /v1/games`: Retrieve available games catalog.
-- `GET /v1/games/:gameId`: Retrieve game details.
-- `POST /v1/sessions`: Create game session (Host secret required).
-- `GET /v1/sessions/:sessionId`: Get session details.
-- `POST /v1/sessions/:sessionId/start|pause|resume|events`: Lifecycle operations.
-- `POST /v1/sessions/:sessionId/complete`: Complete session & submit score.
-- `GET /v1/games/:gameId/leaderboard`: Fetch leaderboards.
-- `GET /v1/users/:externalUserId/stats`: Fetch player statistics.
-
----
-
-## 13. Database Schema
-
-Defined in [`services/api/src/db/schema.sql`](file:///c:/Users/ahmed/OneDrive/Documents/Sage/Sage%20Analytix/sage-game-platform/services/api/src/db/schema.sql). Covers `tenants`, `applications`, `api_keys`, `external_users`, `games`, `game_versions`, `tenant_game_access`, `game_sessions`, `game_events`, `game_results`, `player_stats`, `leaderboards`, `leaderboard_entries`, and `webhooks`.
-
----
-
-## 14. Security Architecture
-
-- **Zero Trust Client**: All client scores are validated server-side against physical limits and timing metrics.
-- **Short-Lived Tokens**: Session tokens expire automatically after 1 hour.
-- **Tenant Isolation**: Multi-tenant authorization check enforced on every query.
-- **HMAC Signatures**: Server-to-server webhooks signed with HMAC SHA-256 using `webhook_secret`.
-
----
-
-## 15. Event Architecture
-
-Type-safe event system:
-
-```ts
-type GameEvent =
-  | GameStartedEvent
-  | GamePausedEvent
-  | GameResumedEvent
-  | GameProgressEvent
-  | GameScoreUpdatedEvent
-  | GameCompletedEvent
-  | GameErrorEvent
-  | CustomGameEvent;
-```
-
----
-
-## 16. Leaderboard Architecture
-
-Supports:
-- Global Leaderboards
-- Per-Game Leaderboards
-- Per-Tenant Leaderboards
-- Time Periods: `all_time`, `daily`, `weekly`, `monthly`.
-
----
-
-## 17. Player Statistics Architecture
-
-Tracks overall user metrics and per-game performance:
-- `gamesPlayed`, `gamesCompleted`
-- `totalScore`, `highestScore`, `averageScore`
-- `totalPlayTimeSeconds`
-
----
-
-## 18. Webhook Architecture
-
-SageGame dispatches server-to-server webhooks to Host Backends:
-- `game.session.created`
-- `game.session.started`
-- `game.session.completed`
-- `game.result.created`
-- `game.session.expired`
-
-Payload contains HMAC signature header `X-SageGame-Signature`.
-
----
-
-## 19-21. Example Integrations
-
-- **React Web App**: Located in [`examples/react-web-app/src/App.tsx`](file:///c:/Users/ahmed/OneDrive/Documents/Sage/Sage%20Analytix/sage-game-platform/examples/react-web-app/src/App.tsx).
-- **React Native App**: Located in [`examples/react-native-app/App.tsx`](file:///c:/Users/ahmed/OneDrive/Documents/Sage/Sage%20Analytix/sage-game-platform/examples/react-native-app/App.tsx).
-- **Host Backend**: Located in [`examples/host-backend/server.ts`](file:///c:/Users/ahmed/OneDrive/Documents/Sage/Sage%20Analytix/sage-game-platform/examples/host-backend/server.ts).
-
----
-
-## 22. Testing Architecture
-
-- Unit tests for core SDK classes using Node test runner / Vitest.
-- Integration tests verifying API session creation, lifecycle transitions, score validation, and leaderboard calculation.
-
----
-
-## 23. Developer Documentation & Deployment Structure
-
-- **Developer Guide**: Comprehensive guide for host app developers and platform game module creators in [`docs/DEVELOPER_GUIDE.md`](file:///c:/Users/ahmed/OneDrive/Documents/Sage/Sage%20Analytix/sage-game-platform/docs/DEVELOPER_GUIDE.md).
-- **Deployment Guide**: Complete guide for PostgreSQL database setup, API server cloud deployment, Docker containerization, NPM package publishing, and CI/CD pipelines in [`docs/DEPLOYMENT.md`](file:///c:/Users/ahmed/OneDrive/Documents/Sage/Sage%20Analytix/sage-game-platform/docs/DEPLOYMENT.md).
-
-- Quickstart Guide: Integrating `@sagegame/react` & `@sagegame/react-native`.
-- Game Developer Guide: Creating new custom game modules implementing `GameModule`.
-- Backend Integration Guide: Authenticating host servers and handling webhooks.
+| Layer | How |
+| --- | --- |
+| Engine and games | Vitest: golden values, determinism snapshots, live-vs-replay parity, property tests with fast-check, and a regression test per known bug |
+| API | Vitest + supertest against **PGlite** (real Postgres in WASM) with the same Supabase migrations |
+| SDK ↔ API | `SessionController` against the real API over HTTP: offline recovery, retries, SDK version mismatch |
+| UI | `npm run test:ui`: Playwright plays every game in both SDKs (React Native through react-native-web) with clicks, drags and taps, and checks the verified result screen. Runs in CI and uploads screenshots. |

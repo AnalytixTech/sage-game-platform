@@ -15,7 +15,6 @@ export const WORD_SEARCH_GAME_ID = 'game_word_search_001';
 export const MIN_GRID_SIZE = 6;
 export const MAX_GRID_SIZE = 15;
 const MAX_WORDS = 30;
-const PLACEMENT_ATTEMPTS = 300;
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 export type WordSearchDifficulty = 'easy' | 'medium' | 'hard';
@@ -160,57 +159,16 @@ export const wordSearchRules: GameRules<WordSearchRulesConfig, WordSearchState, 
     const entries = config.words.map((entry) => ({ entry, token: normalizeToken(entry.token) }));
     const longest = entries.reduce((max, e) => (e.token.length <= MAX_GRID_SIZE ? Math.max(max, e.token.length) : max), 0);
     // Grow the grid to fit the longest word instead of silently dropping it.
-    const size = Math.min(Math.max(config.gridSize, longest, MIN_GRID_SIZE), MAX_GRID_SIZE);
+    let size = Math.min(Math.max(config.gridSize, longest, MIN_GRID_SIZE), MAX_GRID_SIZE);
 
-    const grid: string[] = new Array(size * size).fill('');
-    const directions = DIRECTIONS[config.difficulty];
-    const words: PlacedWord[] = [];
-    const skippedWords: string[] = [];
-
-    // Place longer words first; they are the hardest to fit.
-    const ordered = entries
-      .map((e, i) => ({ ...e, i }))
-      .sort((a, b) => b.token.length - a.token.length || a.i - b.i);
-
-    for (const { entry, token } of ordered) {
-      if (token.length > size) {
-        skippedWords.push(entry.display);
-        continue;
-      }
-
-      let cells: number[] | null = null;
-      for (let attempt = 0; attempt < PLACEMENT_ATTEMPTS && !cells; attempt++) {
-        const [dr, dc] = rng.pick(directions);
-        const r0 = rng.int(size);
-        const c0 = rng.int(size);
-        const r1 = r0 + dr * (token.length - 1);
-        const c1 = c0 + dc * (token.length - 1);
-        if (r1 < 0 || r1 >= size || c1 < 0 || c1 >= size) continue;
-
-        const candidate: number[] = [];
-        for (let k = 0; k < token.length; k++) {
-          const idx = (r0 + dr * k) * size + (c0 + dc * k);
-          if (grid[idx] !== '' && grid[idx] !== token[k]) break;
-          candidate.push(idx);
-        }
-        if (candidate.length === token.length) cells = candidate;
-      }
-
-      if (!cells) {
-        skippedWords.push(entry.display);
-        continue;
-      }
-
-      cells.forEach((idx, k) => (grid[idx] = token[k]));
-      words.push({
-        token,
-        display: entry.display,
-        definition: entry.definition,
-        note: entry.note,
-        cells,
-        found: false,
-      });
+    // Place every word; if some don't fit, retry on a bigger grid (up to the maximum).
+    let placement = placeWords(entries, size, DIRECTIONS[config.difficulty], rng.fork(`size-${size}`));
+    while (placement.noSpace.length > 0 && size < MAX_GRID_SIZE) {
+      size++;
+      placement = placeWords(entries, size, DIRECTIONS[config.difficulty], rng.fork(`size-${size}`));
     }
+    const { grid, words } = placement;
+    const skippedWords = [...placement.tooLong, ...placement.noSpace];
 
     for (let i = 0; i < grid.length; i++) {
       if (grid[i] === '') grid[i] = ALPHABET[rng.int(ALPHABET.length)];
@@ -296,6 +254,60 @@ export const wordSearchRules: GameRules<WordSearchRulesConfig, WordSearchState, 
 
   race: { ranking: 'time_then_score' },
 };
+
+
+interface Entry {
+  entry: WordSearchEntry;
+  token: string;
+}
+
+/**
+ * Place words longest-first. For each word, every position that fits is listed and one is
+ * picked with the seeded rng, so a word is only skipped when it truly cannot fit.
+ */
+function placeWords(entries: Entry[], size: number, directions: [number, number][], rng: ReturnType<typeof createRng>) {
+  const grid: string[] = new Array(size * size).fill('');
+  const words: PlacedWord[] = [];
+  const tooLong: string[] = [];
+  const noSpace: string[] = [];
+
+  const ordered = entries.map((e, i) => ({ ...e, i })).sort((a, b) => b.token.length - a.token.length || a.i - b.i);
+
+  for (const { entry, token } of ordered) {
+    if (token.length > size) {
+      tooLong.push(entry.display);
+      continue;
+    }
+
+    const candidates: number[][] = [];
+    for (const [dr, dc] of directions) {
+      for (let r0 = 0; r0 < size; r0++) {
+        for (let c0 = 0; c0 < size; c0++) {
+          const r1 = r0 + dr * (token.length - 1);
+          const c1 = c0 + dc * (token.length - 1);
+          if (r1 < 0 || r1 >= size || c1 < 0 || c1 >= size) continue;
+          const cells: number[] = [];
+          for (let k = 0; k < token.length; k++) {
+            const idx = (r0 + dr * k) * size + (c0 + dc * k);
+            if (grid[idx] !== '' && grid[idx] !== token[k]) break;
+            cells.push(idx);
+          }
+          if (cells.length === token.length) candidates.push(cells);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      noSpace.push(entry.display);
+      continue;
+    }
+    const cells = rng.pick(candidates);
+    cells.forEach((idx, k) => (grid[idx] = token[k]));
+    words.push({ token, display: entry.display, definition: entry.definition, note: entry.note, cells, found: false });
+  }
+
+  return { grid, words, tooLong, noSpace };
+}
 
 /** Cells on the straight line from `from` to `to` (horizontal, vertical or diagonal), or null. */
 export function selectionCells(size: number, from: [number, number], to: [number, number]): number[] | null {

@@ -1,20 +1,25 @@
 {
   "name": "@sagegames/react-native",
-  "version": "1.0.1",
-  "description": "React Native & Expo SDK for SageGame Platform",
+  "version": "2.0.0",
+  "description": "React Native & Expo SDK for SageGames: playable game screens, launcher and leaderboards",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc"
   },
   "dependencies": {
-    "@sagegames/core": "1.0.0",
-    "@sagegames/react": "1.0.0",
-    "@sagegames/types": "1.0.0"
+    "@sagegames/core": "2.0.0",
+    "@sagegames/react-headless": "2.0.0",
+    "@sagegames/types": "2.0.0",
+    "@sagegames/game-memory-match": "2.0.0",
+    "@sagegames/game-quiz-master": "2.0.0",
+    "@sagegames/game-sudoku": "2.0.0",
+    "@sagegames/game-word-rush": "2.0.0",
+    "@sagegames/game-word-search": "2.0.0"
   },
   "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0",
-    "react-native": "*"
+    "react": ">=18",
+    "react-native": ">=0.72"
   },
   "keywords": [
     "sagegames",
@@ -22,5 +27,8 @@
     "react-native",
     "expo",
     "sdk"
+  ],
+  "files": [
+    "dist"
   ]
 }

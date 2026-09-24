@@ -1,0 +1,31 @@
+{
+  "name": "@sagegames/react-headless",
+  "version": "2.0.0",
+  "description": "Platform-agnostic React bindings for SageGames: provider, launcher and game controller hooks",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@sagegames/core": "2.0.0",
+    "@sagegames/engine": "2.0.0",
+    "@sagegames/types": "2.0.0",
+    "@sagegames/game-memory-match": "2.0.0",
+    "@sagegames/game-quiz-master": "2.0.0",
+    "@sagegames/game-sudoku": "2.0.0",
+    "@sagegames/game-word-rush": "2.0.0",
+    "@sagegames/game-word-search": "2.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "keywords": [
+    "sagegames",
+    "react",
+    "hooks"
+  ]
+}

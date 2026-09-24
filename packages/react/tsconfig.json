@@ -3,11 +3,41 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "composite": true
+    "composite": true,
+    "target": "ES2019",
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ]
   },
   "references": [
-    { "path": "../types" },
-    { "path": "../core" }
+    {
+      "path": "../types"
+    },
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../react-headless"
+    },
+    {
+      "path": "../../games/memory-match"
+    },
+    {
+      "path": "../../games/quiz-master"
+    },
+    {
+      "path": "../../games/sudoku"
+    },
+    {
+      "path": "../../games/word-rush"
+    },
+    {
+      "path": "../../games/word-search"
+    }
   ],
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

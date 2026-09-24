@@ -1,0 +1,51 @@
+/** Every user-facing string, so hosts can translate or reword them. */
+export const defaultLabels = {
+  loading: 'Loading game…',
+  play: 'Play',
+  playAgain: 'Play again',
+  pause: 'Pause',
+  resume: 'Resume',
+  paused: 'Paused',
+  quit: 'End game',
+  quitConfirm: 'End this game? Your current score will be submitted.',
+  submitting: 'Checking your score…',
+  retrying: 'Connection trouble, retrying…',
+  tryAgain: 'Try again',
+  close: 'Close',
+  score: 'Score',
+  time: 'Time',
+  yourScore: 'Your score',
+  rank: 'Rank',
+  leaderboard: 'Leaderboard',
+  verified: 'Verified score',
+  notRanked: 'This score is not ranked.',
+  rejected: "We couldn't verify this game, so it doesn't count.",
+  you: 'You',
+  noScoresYet: 'No scores yet. Be the first!',
+  // Quiz
+  question: 'Question',
+  correct: 'Correct!',
+  wrongAnswerWas: 'The answer was',
+  timeUp: "Time's up",
+  // Sudoku
+  notes: 'Notes',
+  erase: 'Erase',
+  hint: 'Hint',
+  hints: 'Hints',
+  mistakes: 'Mistakes',
+  // Memory
+  moves: 'Moves',
+  pairs: 'Pairs',
+  // Word search / rush
+  found: 'Found',
+  words: 'Words',
+  submitWord: 'Submit',
+  clear: 'Clear',
+  notAWord: 'Not a word',
+  alreadyFound: 'Already found',
+  tooShort: 'Too short',
+  notAdjacent: 'Tiles must touch',
+  skippedWords: "Some words didn't fit the grid",
+};
+
+export type SageLabels = typeof defaultLabels;

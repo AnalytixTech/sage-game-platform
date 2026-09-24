@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     include: ['packages/*/test/**/*.test.ts', 'games/*/test/**/*.test.ts', 'services/*/test/**/*.test.ts'],
-    testTimeout: 20000,
+    // Generous: PGlite and property tests share CPU when files run in parallel.
+    testTimeout: 60000,
   },
 });

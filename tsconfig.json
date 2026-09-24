@@ -45,6 +45,9 @@
       ],
       "@sagegames/engine": [
         "packages/engine/src/index.ts"
+      ],
+      "@sagegames/react-headless": [
+        "packages/react-headless/src/index.ts"
       ]
     }
   },
@@ -60,12 +63,6 @@
       "path": "./packages/core"
     },
     {
-      "path": "./packages/react"
-    },
-    {
-      "path": "./packages/react-native"
-    },
-    {
       "path": "./games/quiz-master"
     },
     {
@@ -79,6 +76,15 @@
     },
     {
       "path": "./games/sudoku"
+    },
+    {
+      "path": "./packages/react-headless"
+    },
+    {
+      "path": "./packages/react"
+    },
+    {
+      "path": "./packages/react-native"
     },
     {
       "path": "./services/api"

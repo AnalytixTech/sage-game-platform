@@ -5,7 +5,6 @@
     "rootDir": "./src",
     "composite": true,
     "skipLibCheck": true,
-    "noImplicitAny": false,
     "paths": {
       "@sagegames/types": [
         "packages/types/src/index.ts"
@@ -39,8 +38,12 @@
       ],
       "react-native": [
         "node_modules/react-native/types_generated/index.d.ts"
+      ],
+      "@sagegames/react-headless": [
+        "packages/react-headless/src/index.ts"
       ]
-    }
+    },
+    "target": "ES2019"
   },
   "references": [
     {
@@ -50,7 +53,22 @@
       "path": "../core"
     },
     {
-      "path": "../react"
+      "path": "../react-headless"
+    },
+    {
+      "path": "../../games/memory-match"
+    },
+    {
+      "path": "../../games/quiz-master"
+    },
+    {
+      "path": "../../games/sudoku"
+    },
+    {
+      "path": "../../games/word-rush"
+    },
+    {
+      "path": "../../games/word-search"
     }
   ],
   "include": [

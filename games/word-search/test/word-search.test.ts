@@ -27,7 +27,7 @@ describe('word search', () => {
 
   it('regression: grows the grid instead of silently dropping long words', () => {
     const s = wordSearchRules.init('japa', wordSearchRules.parseConfig(JAPABUDZ_CONFIG));
-    expect(s.size).toBe(11);
+    expect(s.size).toBeGreaterThanOrEqual(11); // at least the longest word; more if needed to fit everything
     expect(s.words.map((w) => w.token)).toEqual(expect.arrayContaining(['IMMIGRATION', 'SCHOLARSHIP']));
     expect(s.skippedWords).toEqual([]);
   });

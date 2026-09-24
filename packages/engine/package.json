@@ -1,6 +1,6 @@
 {
   "name": "@sagegames/engine",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Deterministic game engine for SageGame Platform: seeded PRNG, play loop and server-side replay",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +11,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@sagegames/types": "1.0.0"
+    "@sagegames/types": "2.0.0"
   },
   "keywords": [
     "sagegames",
