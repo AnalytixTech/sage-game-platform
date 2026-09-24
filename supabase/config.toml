@@ -195,7 +195,8 @@ password_requirements = "lower_upper_letters_digits"
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# Brevo delivers the mail (via the send-email hook), so this only guards against abuse.
+email_sent = 60
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -232,26 +233,12 @@ otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
-# [auth.email.smtp]
-# enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# Portal emails are sent by the send-email Edge Function through the Brevo API (see [auth.hook.send_email]).
+# SMTP is not used.
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
-
-# Uncomment to customize notification email template
-# [auth.email.notification.password_changed]
-# enabled = true
-# subject = "Your password has been changed"
-# content_path = "./supabase/templates/password_changed_notification.html"
+# Sent through the send-email hook like every other auth email.
+[auth.email.notification.password_changed]
+enabled = true
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
@@ -283,6 +270,14 @@ max_frequency = "5s"
 # [auth.hook.custom_access_token]
 # enabled = true
 # uri = "pg-functions://<database>/<schema>/<hook_name>"
+
+# Every auth email (sign-up confirmation, password reset, email change, notices) is handed to the
+# send-email Edge Function, which renders the SageGames template and sends it with the Brevo API.
+# The secret must match SEND_EMAIL_HOOK_SECRET set on the function (see docs/DEPLOYMENT.md).
+[auth.hook.send_email]
+enabled = true
+uri = "https://aohcevwbwhjbtrvsmmcu.supabase.co/functions/v1/send-email"
+secrets = "env(SEND_EMAIL_HOOK_SECRET)"
 
 # Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
 # Not declared here, so config push leaves the hosted SMS provider settings unchanged.
@@ -370,6 +365,10 @@ enabled = false
 authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
+
+# Called by Supabase Auth with a signed webhook, not by users, so no user JWT.
+[functions.send-email]
+verify_jwt = false
 
 [edge_runtime]
 enabled = true

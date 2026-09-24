@@ -60,7 +60,54 @@ npx supabase config push
 > - add `https://<your-render-url>/portal/` to the redirect URLs
 > - turn on **Confirm email**
 
-**Email delivery:** Supabase's built-in email service is heavily rate-limited, and newer projects only send it to members of your Supabase organisation. Before opening sign-ups to other developers, set up custom SMTP (Resend, Postmark, SES, etc.) under **Authentication → Emails → SMTP Settings**, or in `[auth.email.smtp]` in `config.toml`.
+### Email delivery (Brevo API, from sageanalytix.cloud)
+
+Portal emails are sent by the **`send-email` Edge Function** ([supabase/functions/send-email](../supabase/functions/send-email)) through **Brevo's transactional email API**, as `SageGames <no-reply@sageanalytix.cloud>`. That covers sign-up confirmation, password reset, email change, the reauthentication code, and notices such as "password changed". SMTP isn't used.
+
+How it works:
+
+1. Supabase Auth calls the function for every auth email, signing the request with a shared secret (`[auth.hook.send_email]` in `config.toml`).
+2. The function verifies the signature, renders the SageGames template ([templates.ts](../supabase/functions/send-email/templates.ts)) and posts it to `https://api.brevo.com/v3/smtp/email`.
+
+The function runs on Supabase, so sign-up emails don't depend on the Render API being awake.
+
+One-time setup:
+
+1. **Authenticate the domain in Brevo.** Go to **Senders, Domains & Dedicated IPs → Domains → Add a domain → `sageanalytix.cloud`**. Brevo lists DNS records to add at your DNS provider:
+   - a `brevo-code` TXT record (ownership)
+   - DKIM records (`brevo1._domainkey`, `brevo2._domainkey`)
+   - a DMARC TXT record on `_dmarc` if you don't have one; `v=DMARC1; p=none; rua=mailto:postmaster@sageanalytix.cloud` is a safe start
+
+   Wait until Brevo shows the domain as **Authenticated**. Without this, mail lands in spam or is rejected.
+2. **Add the sender** `no-reply@sageanalytix.cloud` under **Senders**.
+3. **Create an API key** under **SMTP & API → API keys** (it starts with `xkeysib-`). Put it in `supabase/.env`. Git ignores that file, and it already holds a generated `SEND_EMAIL_HOOK_SECRET`:
+
+   ```env
+   SEND_EMAIL_HOOK_SECRET=v1,whsec_…   # generated; the function and the Auth hook must share it
+   BREVO_API_KEY=xkeysib-…
+   ```
+
+4. **Deploy, in this order,** so the function exists before Auth starts calling it:
+
+   ```bash
+   npx supabase secrets set --env-file supabase/.env
+   npx supabase functions deploy send-email --use-api --no-verify-jwt
+   set -a; . supabase/.env; set +a      # makes SEND_EMAIL_HOOK_SECRET available to config push
+   npx supabase config diff              # should show only the send_email hook and email settings
+   npx supabase config push
+   ```
+
+5. **Test it:** sign up at `/portal` with a real inbox. The email should arrive from `no-reply@sageanalytix.cloud`.
+   - If it doesn't arrive, check **Supabase → Edge Functions → send-email → Logs**.
+   - For delivery status, check **Brevo → Transactional → Logs**.
+
+**Changing an email:** edit `templates.ts`, run `npm test`, then run `npx supabase functions deploy send-email --use-api --no-verify-jwt`.
+
+**Rotating the Brevo key:** update `BREVO_API_KEY` in `supabase/.env` and run `npx supabase secrets set --env-file supabase/.env`. No redeploy is needed.
+
+**Rotating the hook secret:** put a new `v1,whsec_<base64>` value in the file, then run both `secrets set` and `config push`.
+
+Brevo's free plan sends 300 emails a day, far more than the portal needs. Supabase's own rate limit is 60 auth emails an hour (`[auth.rate_limit] email_sent`).
 
 ## 4. Deploy the API on Render
 
