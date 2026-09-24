@@ -90,3 +90,34 @@ describe('memory match', () => {
     );
   });
 });
+
+describe('memory match: battle view (hidden information)', () => {
+  const config = memoryMatchRules.parseConfig({ pairCount: 6 });
+  const view = memoryMatchRules.view!;
+
+  it('shows no faces before any flip', () => {
+    const s = memoryMatchRules.init('hidden', config);
+    expect(view(s).cards.every((c) => c.face === '')).toBe(true);
+    expect(view(s).cards).toHaveLength(12);
+  });
+
+  it('shows only revealed and matched cards', () => {
+    let s = memoryMatchRules.init('hidden', config);
+    const [[a, b], [c, d]] = pairsOf(s);
+    s = memoryMatchRules.reduce(s, { type: 'FLIP', payload: { index: a } }, 100);
+    s = memoryMatchRules.reduce(s, { type: 'FLIP', payload: { index: b } }, 200);
+    s = memoryMatchRules.reduce(s, { type: 'FLIP', payload: { index: c } }, 300);
+    const v = view(s);
+    const shown = v.cards.map((card, i) => (card.face ? i : -1)).filter((i) => i >= 0).sort((x, y) => x - y);
+    expect(shown).toEqual([a, b, c].sort((x, y) => x - y));
+    expect(v.cards[d].face).toBe('');
+    // Everything the views and scoreboard use is kept.
+    expect(memoryMatchRules.score(v)).toBe(memoryMatchRules.score(s));
+    expect(memoryMatchRules.progress(v)).toBe(memoryMatchRules.progress(s));
+  });
+
+  it('does not change on ticks (elapsedMs is dropped)', () => {
+    const s = memoryMatchRules.init('hidden', config);
+    expect(JSON.stringify(view(memoryMatchRules.advance(s, 5000)))).toBe(JSON.stringify(view(s)));
+  });
+});

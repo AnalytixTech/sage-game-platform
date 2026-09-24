@@ -79,6 +79,14 @@ export interface GameRules<TConfig, TState, TAction extends RulesAction, TResult
 
   /** Optional soft checks; returned codes are stored as flags and exclude the result from leaderboards. */
   plausibility?(state: TState, log: ActionLog): string[];
+
+  /**
+   * Games with hidden information (card faces, correct answers) define what a player may see.
+   * In battles the server keeps the seed and the full state, and sends players only this view, so
+   * the answers never reach the device. Return the same shape with secrets blanked, and without
+   * fields that change on every tick (elapsedMs), so unchanged views compare equal.
+   */
+  view?(state: TState): TState;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

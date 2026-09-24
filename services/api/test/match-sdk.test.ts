@@ -2,8 +2,9 @@ import http from 'http';
 import { AddressInfo } from 'net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { MatchController, MatchSeat, WebSocketLike } from '@sagegames/core';
+import { GameRuntime, MatchController, MatchSeat, RemoteRuntime, WebSocketLike } from '@sagegames/core';
 import { memoryMatchRules, MemoryMatchState } from '@sagegames/game-memory-match';
+import { sudokuRules } from '@sagegames/game-sudoku';
 import { createApp } from '../src/app';
 import { MatchHub } from '../src/realtime/MatchRoom';
 import { attachRealtime } from '../src/realtime/wsServer';
@@ -57,7 +58,7 @@ describe('SDK MatchController against the real server', () => {
     const c = new MatchController({
       baseUrl,
       seat,
-      resolveRules: (id) => (id === memoryMatchRules.gameId ? memoryMatchRules : undefined),
+      resolveRules: (id) => [memoryMatchRules, sudokuRules].find((r) => r.gameId === id),
       createSocket: (url) => {
         const ws = new WebSocket(url);
         sockets.push(ws);
@@ -70,11 +71,11 @@ describe('SDK MatchController against the real server', () => {
   };
 
   /** What the host backend does: create the match and hand each player their seat. */
-  const setupMatch = async () => {
+  const setupMatch = async (game: Record<string, unknown> = { gameId: 'game_memory_001' }) => {
     const m = await api
       .post('/v2/matches')
       .set(auth(apiKey))
-      .send({ gameId: 'game_memory_001', players: [{ externalUserId: 'ada', displayName: 'Ada' }, { externalUserId: 'bayo', displayName: 'Bayo' }] });
+      .send({ ...game, players: [{ externalUserId: 'ada', displayName: 'Ada' }, { externalUserId: 'bayo', displayName: 'Bayo' }] });
     const seat = async (externalUserId: string): Promise<MatchSeat> => {
       const t = await api.post(`/v2/matches/${m.body.matchId}/tokens`).set(auth(apiKey)).send({ externalUserId });
       return { matchId: m.body.matchId, playerToken: t.body.playerToken };
@@ -82,8 +83,13 @@ describe('SDK MatchController against the real server', () => {
     return { ada: await seat('ada'), bayo: await seat('bayo') };
   };
 
-  const pairs = (c: MatchController) => {
-    const state = c.getSnapshot().runtime!.getSnapshot().state as MemoryMatchState;
+  /** The deck, from the database: the app itself never learns the faces in advance. */
+  const pairs = async (seat: MatchSeat) => {
+    const [row] = await env.db.query<{ seed: string; resolved_config: Record<string, unknown> }>(
+      'SELECT seed, resolved_config FROM matches WHERE id = $1',
+      [seat.matchId]
+    );
+    const state = memoryMatchRules.init(row.seed, memoryMatchRules.parseConfig(row.resolved_config));
     const map = new Map<string, number[]>();
     state.cards.forEach((card, i) => map.set(card.face, [...(map.get(card.face) ?? []), i]));
     return [...map.values()];
@@ -100,13 +106,23 @@ describe('SDK MatchController against the real server', () => {
     bayo.ready();
     await until(() => ada.getSnapshot().phase === 'countdown');
     expect(ada.getSnapshot().startsAtLocal).toBeGreaterThan(Date.now() - 50);
-    await until(() => ada.getSnapshot().phase === 'playing' && bayo.getSnapshot().phase === 'playing');
+    await until(() => !!ada.getSnapshot().runtime && !!bayo.getSnapshot().runtime);
 
-    // Moves are applied locally at once and streamed to the server.
-    const deck = pairs(ada);
-    for (const [x, y] of deck) {
-      ada.getSnapshot().runtime!.dispatch('FLIP', { index: x });
-      ada.getSnapshot().runtime!.dispatch('FLIP', { index: y });
+    // Memory hides card faces: the app shows the server's view and only forwards moves.
+    const runtime = ada.getSnapshot().runtime!;
+    expect(runtime).toBeInstanceOf(RemoteRuntime);
+    const board = () => runtime.getSnapshot().state as MemoryMatchState;
+    expect(board().cards.every((c) => c.face === '')).toBe(true);
+
+    const deck = await pairs(seats.ada);
+    const [[x0]] = deck;
+    runtime.dispatch('FLIP', { index: x0 });
+    await until(() => board().cards[x0].face !== '');
+    expect(board().cards.filter((c) => c.face !== '')).toHaveLength(1);
+    runtime.dispatch('FLIP', { index: deck[0][1] });
+    for (const [x, y] of deck.slice(1)) {
+      runtime.dispatch('FLIP', { index: x });
+      runtime.dispatch('FLIP', { index: y });
       await sleep(5);
     }
     await until(() => ada.getSnapshot().phase === 'waiting');
@@ -130,9 +146,9 @@ describe('SDK MatchController against the real server', () => {
     await until(() => ada.getSnapshot().phase === 'lobby' && bayo.getSnapshot().phase === 'lobby');
     ada.ready();
     bayo.ready();
-    await until(() => ada.getSnapshot().phase === 'playing');
+    await until(() => ada.getSnapshot().phase === 'playing' && !!ada.getSnapshot().runtime);
 
-    const [[x, y]] = pairs(ada);
+    const [[x, y]] = await pairs(seats.ada);
     ada.getSnapshot().runtime!.dispatch('FLIP', { index: x });
     ada.getSnapshot().runtime!.dispatch('FLIP', { index: y });
     await until(() => (bayo.getSnapshot().match!.players.find((p) => p.displayName === 'Ada')?.score ?? 0) > 0);
@@ -145,5 +161,16 @@ describe('SDK MatchController against the real server', () => {
     const board = ada.getSnapshot().runtime!.getSnapshot().state as MemoryMatchState;
     expect(board.matchedPairs).toBe(1);
     expect(board.cards[x].matched).toBe(true);
+  });
+
+  it('plays open-information games locally, with instant feedback', async () => {
+    const seats = await setupMatch({ gameId: 'game_sudoku_001', config: { variant: '4x4' } });
+    const [ada, bayo] = [controller(seats.ada), controller(seats.bayo)];
+    await Promise.all([ada.connect(), bayo.connect()]);
+    await until(() => ada.getSnapshot().phase === 'lobby' && bayo.getSnapshot().phase === 'lobby');
+    ada.ready();
+    bayo.ready();
+    await until(() => ada.getSnapshot().phase === 'playing' && !!ada.getSnapshot().runtime);
+    expect(ada.getSnapshot().runtime).toBeInstanceOf(GameRuntime);
   });
 });

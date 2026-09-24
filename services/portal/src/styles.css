@@ -78,11 +78,17 @@ code { background: var(--surface-2); padding: 2px 6px; border-radius: 6px; }
 .app-card h2 { margin-bottom: 4px; }
 
 label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 550; }
-input, select {
+input, select, textarea {
   font: inherit; color: var(--text); background: var(--surface-2);
   border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; width: 100%;
 }
-input:focus, select:focus, button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+textarea { min-height: 120px; resize: vertical; font-family: ui-monospace, monospace; font-size: 13px; }
+input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.question { display: grid; grid-template-columns: 2rem 1fr; gap: 10px; align-items: start; }
+.question .num { color: var(--muted); font-weight: 700; padding-top: 30px; }
+.question .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.question .fields .wide { grid-column: 1 / -1; }
+details summary { cursor: pointer; font-weight: 600; }
 
 button {
   font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px; padding: 9px 16px;

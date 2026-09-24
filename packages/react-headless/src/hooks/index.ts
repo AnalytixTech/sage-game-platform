@@ -7,6 +7,7 @@ import {
   LeaderboardQuery,
   MatchController,
   MatchSeat,
+  PlayableRuntime,
   RuntimeSnapshot,
   SessionController,
   WebSocketLike,
@@ -24,9 +25,8 @@ export function useInterval(fn: () => void, ms: number, active: boolean) {
   }, [ms, active]);
 }
 
-/** Subscribe to a game runtime's state. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function useRuntimeSnapshot<S = unknown>(runtime: GameRuntime<any, S, any, any>): RuntimeSnapshot<S> {
+/** Subscribe to a game runtime's state (local play, or a battle's server view). */
+export function useRuntimeSnapshot<S = unknown>(runtime: PlayableRuntime<S>): RuntimeSnapshot<S> {
   return useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
 }
 

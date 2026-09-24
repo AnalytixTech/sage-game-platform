@@ -128,6 +128,9 @@ Environment variables (see [`services/api/.env.example`](../services/api/.env.ex
 | `API_KEY_PEPPER` | 32+ random characters (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). **Changing it invalidates every API key**, so store it somewhere safe. |
 | `PUBLIC_BASE_URL` | The Render URL, e.g. `https://sage-game-platform.onrender.com` |
 | `SAGE_TENANT_KEYS` | Optional. Bootstrap keys for tenants that existed before the portal (see [KEYS_SETUP.md](KEYS_SETUP.md)). |
+| `SENTRY_DSN` | Optional. A Sentry project's DSN, to be told about unexpected errors. Without it, errors are only logged. Render's `RENDER_GIT_COMMIT` is attached as the release. |
+| `LOG_LEVEL` | Optional. `info` (default), `debug`, `warn`, `error` or `silent`. |
+| `LOG_FORMAT` | Optional. `json` (default in production) or `pretty`. |
 
 When the API starts, it:
 
@@ -135,6 +138,7 @@ When the API starts, it:
 2. syncs the game catalog into the database
 3. creates any tenants named in `SAGE_TENANT_KEYS`
 4. starts the webhook worker
+5. logs `listening` with `errorReporting: "sentry"` or `"off"`, so you can confirm the Sentry setup from Render's logs
 
 The free Render plan sleeps after 15 minutes idle, and the first request afterwards takes 30–60 seconds. That's fine for trying the platform out. Use a paid plan once real players depend on it, and certainly for online battles.
 

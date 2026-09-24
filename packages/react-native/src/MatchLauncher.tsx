@@ -1,7 +1,7 @@
 import React, { ReactNode } from 'react';
 import { ScrollView, StyleProp, Text, View, ViewStyle } from 'react-native';
 import { MatchPlayerView, MatchStanding } from '@sagegames/types';
-import { GameRuntime, MatchSeat } from '@sagegames/core';
+import { MatchSeat, PlayableRuntime } from '@sagegames/core';
 import { formatDuration, GamePlugin, useMatch, useRuntimeSnapshot, useSage } from '@sagegames/react-headless';
 import { Body, Button, Card, font, Heading, Loading, ProgressBar } from './ui/primitives';
 
@@ -182,7 +182,7 @@ function RaceView({
   plugin,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  runtime: GameRuntime<any, any, any, any>;
+  runtime: PlayableRuntime<any>;
   plugin: GamePlugin;
 }) {
   const { theme, labels } = useSage();

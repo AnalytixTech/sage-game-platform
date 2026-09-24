@@ -25,6 +25,7 @@ import {
   usage,
   validateWebhookUrl,
 } from '../services/tenants';
+import { deleteQuizBank, getQuizBank, listQuizBanks, quizBankBody, saveQuizBank } from '../services/quizBanks';
 
 const MAX_APPS_PER_USER = 10;
 
@@ -212,6 +213,42 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
     asyncHandler(async (req, res) => {
       await member(req.params.appId, user(res).id);
       res.json({ secret: await rotateWebhookSecret(ctx.db, req.params.appId) });
+    })
+  );
+
+  // ---- Quiz banks (reusable question sets, used with config.bankId) ----
+
+  router.get(
+    '/apps/:appId/quiz-banks',
+    asyncHandler(async (req, res) => {
+      await member(req.params.appId, user(res).id);
+      res.json(await listQuizBanks(ctx.db, req.params.appId));
+    })
+  );
+
+  router.get(
+    '/apps/:appId/quiz-banks/:bankId',
+    asyncHandler(async (req, res) => {
+      await member(req.params.appId, user(res).id);
+      res.json(await getQuizBank(ctx.db, req.params.appId, req.params.bankId));
+    })
+  );
+
+  router.put(
+    '/apps/:appId/quiz-banks/:bankId',
+    asyncHandler(async (req, res) => {
+      await member(req.params.appId, user(res).id);
+      const body = parse(quizBankBody, req.body);
+      res.json(await saveQuizBank(ctx.db, req.params.appId, req.params.bankId, body, ctx.now()));
+    })
+  );
+
+  router.delete(
+    '/apps/:appId/quiz-banks/:bankId',
+    asyncHandler(async (req, res) => {
+      await member(req.params.appId, user(res).id);
+      await deleteQuizBank(ctx.db, req.params.appId, req.params.bankId);
+      res.status(204).end();
     })
   );
 

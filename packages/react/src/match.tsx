@@ -1,6 +1,6 @@
 import React, { CSSProperties, ReactNode } from 'react';
 import { MatchPlayerView, MatchStanding } from '@sagegames/types';
-import { GameRuntime, MatchSeat } from '@sagegames/core';
+import { MatchSeat, PlayableRuntime } from '@sagegames/core';
 import { formatDuration, GamePlugin, useMatch, useRuntimeSnapshot, useSage } from '@sagegames/react-headless';
 import { Body, Button, Card, font, Heading, Loading, ProgressBar, row, SageStyles, stack } from './ui';
 
@@ -170,7 +170,7 @@ function RaceView({
   plugin,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  runtime: GameRuntime<any, any, any, any>;
+  runtime: PlayableRuntime<any>;
   plugin: GamePlugin;
 }) {
   const { theme, labels } = useSage();

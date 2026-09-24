@@ -26,6 +26,9 @@ let battle = null;
 page.on('response', async (res) => {
   if (res.url().endsWith('/dev/battle') && res.request().method() === 'POST') battle = await res.json();
 });
+// Everything the players' apps receive over the match sockets.
+const frames = [];
+page.on('websocket', (ws) => ws.on('framereceived', (f) => frames.push(String(f.payload))));
 
 const col = (i) => page.getByTestId(`player-${i}`);
 const text = async (i) => (await col(i).innerText()).replace(/\s+/g, ' ');
@@ -53,6 +56,15 @@ const state = memoryMatchRules.init(battle.seed, battle.config);
 const pairs = new Map();
 state.cards.forEach((c, i) => pairs.set(c.face, [...(pairs.get(c.face) ?? []), i]));
 const list = [...pairs.values()];
+
+// Memory hides card faces in battles: before anyone flips, no face has reached either app.
+const faces = [...new Set(state.cards.map((c) => c.face))];
+const received = frames.join('\n');
+check(
+  received.includes('"type":"state"') &&
+    !received.includes(battle.seed) && faces.every((f) => !received.includes(JSON.stringify(f).slice(1, -1)) && !received.includes(f)),
+  'no seed or card face reaches the apps before a flip'
+);
 
 const flip = async (player, i) => col(player).getByTestId(`memory-card-${i}`).click();
 for (const [a, b] of list.slice(0, 2)) {

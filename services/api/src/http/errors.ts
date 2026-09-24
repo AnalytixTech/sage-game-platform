@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express';
 import { z } from 'zod';
+import { Logger } from '../observability/logger';
 
 export class HttpError extends Error {
   constructor(
@@ -29,10 +30,11 @@ export function parse<T extends z.ZodType>(schema: T, value: unknown): z.infer<T
   return result.data;
 }
 
-export function errorMiddleware(log: (err: unknown) => void) {
+export function errorMiddleware(logger: Logger) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  return (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  return (err: unknown, req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof HttpError) {
+      res.locals.errorCode = err.code;
       return res.status(err.status).json({ error: err.message, code: err.code, details: err.details });
     }
     if (typeof err === 'object' && err !== null && (err as { type?: string }).type === 'entity.too.large') {
@@ -41,7 +43,13 @@ export function errorMiddleware(log: (err: unknown) => void) {
     if (err instanceof SyntaxError && 'body' in err) {
       return res.status(400).json({ error: 'Malformed JSON body', code: 'invalid_json' });
     }
-    log(err);
+    logger.error('unhandled error', {
+      component: 'http',
+      err,
+      requestId: res.locals.requestId,
+      method: req.method,
+      path: req.originalUrl.split('?')[0],
+    });
     res.status(500).json({ error: 'Internal server error', code: 'internal' });
   };
 }

@@ -235,6 +235,15 @@ export const quizMasterRules: GameRules<QuizRulesConfig, QuizState, QuizAction, 
 
   race: { ranking: 'score_then_time' },
 
+  // Answered questions show their answer; the current one hides it; later ones are hidden entirely.
+  view: (state) => ({
+    ...state,
+    questions: state.questions.map((q, i) =>
+      i < state.index ? q : i === state.index ? { ...q, correctIndex: -1 } : { id: '', question: '', category: '', options: [], correctIndex: -1 }
+    ),
+    elapsedMs: 0,
+  }),
+
   plausibility(state) {
     const answered = state.timePerQuestionMs.filter((_, i) => state.answers[i] !== null);
     if (answered.length < 5 || state.correctAnswers < answered.length) return [];

@@ -6,14 +6,29 @@ import { loadConfig } from './config';
 import { createPgDb, one } from './db/db';
 import { parseBootstrapKeys } from './http/auth';
 import { AppContext } from './http/context';
+import { createLogger, Logger } from './observability/logger';
+import { createSentryReporter, ErrorReporter } from './observability/sentry';
 import { attachRealtime } from './realtime/wsServer';
 import { MatchHub } from './realtime/MatchRoom';
 import { abortStaleMatches } from './services/matches';
 import { ensureBootstrapTenants } from './services/tenants';
 import { startWebhookWorker } from './webhooks/dispatcher';
 
+// Until the config is loaded, failures go to a plain JSON logger.
+let logger: Logger = createLogger();
+let reporter: ErrorReporter | null = null;
+
 async function main() {
   const config = loadConfig();
+  reporter = config.sentryDsn
+    ? await createSentryReporter({ dsn: config.sentryDsn, environment: config.env, release: config.release })
+    : null;
+  logger = createLogger({
+    level: config.logLevel,
+    format: config.logFormat,
+    bindings: { service: 'sagegames-api', ...(config.release ? { release: config.release.slice(0, 12) } : {}) },
+    onError: reporter ? (err, msg, fields) => reporter!.capture(err, msg, fields) : undefined,
+  });
   const db = createPgDb(config.databaseUrl, config.databaseSsl);
 
   const schema = await one<{ games: string | null }>(db, `SELECT to_regclass('sagegames.games')::text AS games`);
@@ -23,7 +38,7 @@ async function main() {
 
   await syncCatalog(db);
   const aborted = await abortStaleMatches(db);
-  if (aborted) console.log(`Marked ${aborted} interrupted match(es) as aborted`);
+  if (aborted) logger.warn('marked interrupted matches as aborted', { component: 'matches', count: aborted });
   const bootstrapKeys = parseBootstrapKeys(config.bootstrapTenantKeys);
   await ensureBootstrapTenants(db, bootstrapKeys.map((k) => k.tenantId));
 
@@ -32,7 +47,7 @@ async function main() {
     config,
     verifyPortalToken: createSupabaseVerifier(config),
     now: () => new Date(),
-    log: (message, extra) => console.error(message, extra ?? ''),
+    logger,
   };
 
   const app = createApp(ctx, {
@@ -41,16 +56,16 @@ async function main() {
   });
   const stopWebhooks = startWebhookWorker(ctx);
   const server = app.listen(config.port, () => {
-    console.log(`SageGames API listening on :${config.port} (${config.env})`);
+    logger.info('listening', { port: config.port, env: config.env, errorReporting: reporter ? 'sentry' : 'off' });
   });
   const realtime = attachRealtime(server, ctx, app.locals.matchHub as MatchHub);
 
   const shutdown = (signal: string) => {
-    console.log(`${signal} received, shutting down`);
+    logger.info('shutting down', { signal });
     stopWebhooks();
     void realtime.close();
     server.close(() => {
-      db.close().finally(() => process.exit(0));
+      Promise.allSettled([db.close(), reporter?.flush()]).finally(() => process.exit(0));
     });
     setTimeout(() => process.exit(1), 10_000).unref();
   };
@@ -58,7 +73,14 @@ async function main() {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
+// Anything that escapes a handler is a bug: log it (and report it) rather than die silently.
+process.on('unhandledRejection', (err) => logger.error('unhandled promise rejection', { err }));
+process.on('uncaughtException', (err) => {
+  logger.error('uncaught exception', { err });
+  void (reporter?.flush() ?? Promise.resolve()).finally(() => process.exit(1));
+});
+
 main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
+  logger.error('startup failed', { err });
+  void (reporter?.flush() ?? Promise.resolve()).finally(() => process.exit(1));
 });

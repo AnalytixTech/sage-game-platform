@@ -85,9 +85,15 @@ export interface WelcomeMessage {
   type: 'welcome';
   you: string;
   match: MatchView;
-  play: { gameId: string; rulesVersion: number; seed: string; config: Record<string, unknown> };
+  /**
+   * For games with hidden information (`hidden: true`) there is no seed or config: the server
+   * plays the game and sends your view of it in `state` messages.
+   */
+  play: { gameId: string; rulesVersion: number; hidden: boolean; seed?: string; config?: Record<string, unknown> };
   /** Your moves the server already has (after a reconnect), with server-applied times. */
   actions: [t: number, type: string, payload?: unknown][];
+  /** Hidden-information games, mid-race: your current view of the game. */
+  state?: unknown;
   serverNow: number;
 }
 
@@ -97,6 +103,8 @@ export type ServerMessage =
   | { type: 'countdown'; startAt: number; serverNow: number }
   | { type: 'started'; startAt: number; serverNow: number }
   | { type: 'ack'; seq: number; t: number }
+  /** Hidden-information games: your view of the game after a move or a timeout (race time `t`). */
+  | { type: 'state'; state: unknown; t: number }
   | { type: 'reject'; seq: number; code: string }
   | { type: 'progress'; players: Pick<MatchPlayerView, 'playerId' | 'progress' | 'score' | 'status' | 'finishedMs' | 'connected'>[] }
   | { type: 'finished'; standings: MatchStanding[] }

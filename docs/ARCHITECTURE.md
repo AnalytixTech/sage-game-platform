@@ -40,7 +40,7 @@ Game packages contain no React code, so the API imports exactly the same rules t
   - a game or rules-version mismatch
 - **Soft flags** (the result is stored, but not ranked): moves faster than a human could make, a compressed timeline, and game-specific checks such as a perfect quiz answered in under 0.8 s per question.
 - **Time limits end games; they don't reject them.** An app backgrounded past a timer still verifies, capped at the limit.
-- **Limits.** The server's replay makes it impossible to *invent* a score. It can't stop a modified client from reading the puzzle from memory, since the seed and state are on the device, and playing it perfectly. Plausibility flags catch the obvious cases; server-revealed hidden information (a later phase) closes the rest for battles.
+- **Limits.** The server's replay makes it impossible to *invent* a score. In a solo game it can't stop a modified client from reading the puzzle from memory, since the seed and state are on the device, and playing it perfectly. Plausibility flags catch the obvious cases. In battles, games with hidden information (Memory's card faces, Quiz's answers) never send the seed at all: the server plays the game and each player only receives what they may see (see [Battles](#battles-race-mode)). The other three games have nothing to hide: a Sudoku, word grid or letter grid can be solved from what's on screen.
 
 ### Rules versions
 
@@ -55,7 +55,8 @@ A match gives every player the same seed and config. Each seat is an ordinary `g
 - **Transport.** WebSocket at `/v2/ws` on the API server. The first message must be `{type:'auth', token}` within 5 s; the token never goes in the URL.
 - **The server applies moves live.** Each `action` runs through the same rules as the client, with its time clamped to `[previous move, time the server has seen pass]`. A client can't backdate moves or claim to be faster than the server saw. Illegal moves are answered with `reject` and ignored.
 - **Match room.** One `MatchRoom` per live match, in memory, runs the lobby, the countdown, a 4-per-second progress broadcast, the 30-second grace for disconnects (then forfeit) and the time limit. At the end, one transaction stores each player's replayed result, the standings and the `match.finished` webhook.
-- **Reconnect.** `welcome` carries the moves the server already applied, and the client rebuilds its game from them, so the server's view always wins.
+- **Hidden information.** Games that define `rules.view(state)` (Memory and Quiz) get no seed or config in `welcome`. The server keeps the full state and sends each player their own `view` in `state` messages: after each of their moves, when a timer changes something (a quiz question timing out), and on reconnect. Memory shows only matched and currently revealed faces; Quiz shows a question's answer only once it has been answered or has timed out, and later questions not at all. The app renders these views with a `RemoteRuntime`, so the views and hooks are the same as in solo play. Flips and answers take one round trip to show, which is fine for these two games.
+- **Reconnect.** `welcome` carries the moves the server already applied (or, for hidden-information games, the player's current view), and the client rebuilds its game from them, so the server's view always wins.
 - **Ranking.** Each game's `rules.race` is either `time_then_score` (Sudoku, Word Search, Memory: first to solve) or `score_then_time` (Quiz, Word Rush). Forfeits rank last.
 - **Single instance.** Rooms aren't shared between servers. On startup, matches left in `countdown` or `in_progress` are marked `aborted`; lobbies are reloaded from the database when someone connects.
 
@@ -94,6 +95,12 @@ Keys and session tokens are stored only as hashes. Test-key results never reach 
 - Rate limits: per API key on host routes, per IP on player routes, and stricter on `/complete` and key creation.
 - CORS is open on `/v1` and `/v2`, which use bearer tokens only, and closed on the portal API.
 
+## Logging and error reporting
+
+- **Logs** are one JSON object per line in production (`LOG_FORMAT=json`; Render collects stdout) and readable lines locally. Each request gets one line with `requestId`, method, path (no query string), status, time and tenant. The id comes from a sane incoming `X-Request-Id` or is generated, and is returned in the `X-Request-Id` response header, so a host can quote it when something goes wrong.
+- **Redaction** happens before anything is written or reported: fields named like `authorization`, `token`, `secret`, `password`, `apiKey`… are replaced, and anything shaped like a credential this platform issues (`sk_live_…`, `sk_test_…`, `stk_…`, `whsec_…`, `Bearer …`), or a password in a connection string, is masked wherever it appears in text.
+- **Error reporting.** Every error-level entry that carries an error (unhandled request errors, match results that couldn't be saved, webhook worker failures, uncaught exceptions) goes to Sentry when `SENTRY_DSN` is set, tagged with `requestId`, `component`, `matchId` and `tenantId` where known. Sentry's automatic collection of headers, cookies, bodies, query strings, user info, database query data and local variables is switched off, and events are scrubbed again before sending.
+
 ## Testing
 
 | Layer | How |
@@ -101,5 +108,6 @@ Keys and session tokens are stored only as hashes. Test-key results never reach 
 | Engine and games | Vitest: golden values, determinism snapshots, live-vs-replay parity, property tests with fast-check, and a regression test per known bug |
 | API | Vitest + supertest against **PGlite** (real Postgres in WASM) with the same Supabase migrations |
 | SDK ↔ API | `SessionController` against the real API over HTTP: offline recovery, retries, SDK version mismatch |
-| Battles | Vitest against the real WebSocket server with short timers: lobby → standings, group joins, lobby timeout, forfeit after the grace period, resume after reconnect, move-time clamping, tenant isolation, plus the SDK's `MatchController` racing and reconnecting |
+| Battles | Vitest against the real WebSocket server with short timers: lobby → standings, group joins, lobby timeout, forfeit after the grace period, resume after reconnect, move-time clamping, tenant isolation, plus the SDK's `MatchController` racing and reconnecting, and that Memory faces and Quiz answers never reach a player before they're revealed |
+| Logging | Vitest: JSON lines, levels, redaction of credentials and connection-string passwords, request ids, 500s logged with the request id and handed to the error reporter |
 | UI | `npm run test:ui`: Playwright plays every game in both SDKs (React Native through react-native-web) with clicks, drags and taps, and checks the verified result screen. `npm run test:battle` races two players through the real API. Both run in CI and upload screenshots. |

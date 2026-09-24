@@ -94,7 +94,7 @@ export function attachRealtime(server: http.Server, ctx: AppContext, hub: MatchH
       room?.detach(seat.sessionId, socket);
     });
 
-    ws.on('error', (err) => ctx.log('websocket error', err));
+    ws.on('error', (err) => ctx.logger.warn('websocket error', { component: 'ws', err }));
   });
 
   return {

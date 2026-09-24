@@ -120,3 +120,29 @@ describe('quiz master', () => {
     );
   });
 });
+
+describe('quiz master: battle view (hidden information)', () => {
+  const config = quizMasterRules.parseConfig({ questionCount: 5 });
+  const view = quizMasterRules.view!;
+
+  it('hides the current answer and every later question', () => {
+    const s = quizMasterRules.init('hidden', config);
+    const v = view(s);
+    expect(v.questions).toHaveLength(5);
+    expect(v.questions[0].question).toBe(s.questions[0].question);
+    expect(v.questions[0].options).toEqual(s.questions[0].options);
+    expect(v.questions[0].correctIndex).toBe(-1);
+    for (const q of v.questions.slice(1)) expect(q).toEqual({ id: '', question: '', category: '', options: [], correctIndex: -1 });
+  });
+
+  it('reveals an answer once the question is answered or timed out', () => {
+    let s = quizMasterRules.init('hidden', config);
+    s = quizMasterRules.reduce(s, { type: 'ANSWER', payload: { qIndex: 0, choice: 0 } }, 1000);
+    s = quizMasterRules.advance(s, 1000 + s.limitMs); // question 2 times out
+    const v = view(s);
+    expect(v.questions[0].correctIndex).toBe(s.questions[0].correctIndex);
+    expect(v.questions[1].correctIndex).toBe(s.questions[1].correctIndex);
+    expect(v.questions[2].correctIndex).toBe(-1);
+    expect(quizMasterRules.score(v)).toBe(quizMasterRules.score(s));
+  });
+});

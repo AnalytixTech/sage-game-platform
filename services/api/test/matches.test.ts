@@ -114,6 +114,15 @@ describe('online battles', () => {
     return res.body as { matchId: string; players: { externalUserId: string }[] };
   };
 
+  /** The deck, from the database: players never receive the seed of a hidden-information game. */
+  const deckOf = async (matchId: string) => {
+    const [row] = await env.db.query<{ seed: string; resolved_config: Record<string, unknown> }>(
+      'SELECT seed, resolved_config FROM matches WHERE id = $1',
+      [matchId]
+    );
+    return pairsOf(row.seed, row.resolved_config);
+  };
+
   const tokenFor = async (matchId: string, externalUserId: string) => {
     const res = await api.post(`/v2/matches/${matchId}/tokens`).set(auth(apiKey)).send({ externalUserId });
     expect(res.status).toBe(201);
@@ -129,15 +138,18 @@ describe('online battles', () => {
     const wa = await a.join(await tokenFor(match.matchId, 'ada'));
     await b.join(await tokenFor(match.matchId, 'bayo'));
     expect(wa.match.players.map((p) => p.externalUserId)).toEqual(['ada', 'bayo']);
-    expect(wa.play.seed).toMatch(/^[0-9a-f]{32}$/);
+    // Memory hides card faces: no seed or config reaches the players.
+    expect(wa.play).toEqual({ gameId: 'game_memory_001', rulesVersion: 1, hidden: true });
 
     a.send({ type: 'ready' });
     b.send({ type: 'ready' });
     await a.next('countdown');
     await a.next('started');
+    const first = await a.next('state');
+    expect((first.state as MemoryMatchState).cards.every((c) => c.face === '')).toBe(true);
 
     // Ada solves the deck; Bayo finds two pairs and gives up.
-    const pairs = pairsOf(wa.play.seed, wa.play.config);
+    const pairs = await deckOf(match.matchId);
     for (const [x, y] of pairs) {
       a.act('FLIP', { index: x });
       a.act('FLIP', { index: y });
@@ -227,27 +239,30 @@ describe('online battles', () => {
     const match = await createMatch({ players: [{ externalUserId: 'a' }, { externalUserId: 'b' }] });
     const tokenA = await tokenFor(match.matchId, 'a');
     const [a, b] = [player(), player()];
-    const welcome = await a.join(tokenA);
+    await a.join(tokenA);
     await b.join(await tokenFor(match.matchId, 'b'));
     a.send({ type: 'ready' });
     b.send({ type: 'ready' });
     await a.next('started');
-    const [[x, y]] = pairsOf(welcome.play.seed, welcome.play.config);
+    const [[x, y]] = await deckOf(match.matchId);
     a.act('FLIP', { index: x });
     a.act('FLIP', { index: y });
     await a.next('ack', (m) => m.seq === 2);
     a.close();
 
+    // Hidden-information games resume from the server's view of the board.
     const again = player();
     const back = await again.join(tokenA);
-    expect(back.actions.map((act) => act[1])).toEqual(['FLIP', 'FLIP']);
     expect(back.match.status).toBe('in_progress');
+    const board = back.state as MemoryMatchState;
+    expect(board.matchedPairs).toBe(1);
+    expect(board.cards.filter((c) => c.face !== '').length).toBe(2);
   });
 
   it('never lets a player claim a move in the future or pause the race', async () => {
     const match = await createMatch({ players: [{ externalUserId: 'a' }, { externalUserId: 'b' }] });
     const [a, b] = [player(), player()];
-    const welcome = await a.join(await tokenFor(match.matchId, 'a'));
+    await a.join(await tokenFor(match.matchId, 'a'));
     await b.join(await tokenFor(match.matchId, 'b'));
 
     const early = a.act('FLIP', { index: 0 });
@@ -256,7 +271,7 @@ describe('online battles', () => {
     a.send({ type: 'ready' });
     b.send({ type: 'ready' });
     await a.next('started');
-    const future = a.act('FLIP', { index: pairsOf(welcome.play.seed, welcome.play.config)[0][0] }, 10 * 60_000);
+    const future = a.act('FLIP', { index: (await deckOf(match.matchId))[0][0] }, 10 * 60_000);
     const ack = await a.next('ack', (m) => m.seq === future);
     expect(ack.t).toBeLessThan(5000); // clamped to the server's race clock
 
@@ -264,6 +279,68 @@ describe('online battles', () => {
     expect((await a.next('reject', (m) => m.seq === pause)).code).toBe('pause_not_allowed');
     const junk = a.act('WIN');
     expect((await a.next('reject', (m) => m.seq === junk)).code).toBe('invalid');
+  });
+
+  const race = async (body: Record<string, unknown>) => {
+    const match = await createMatch({ players: [{ externalUserId: 'a' }, { externalUserId: 'b' }], ...body });
+    const [a, b] = [player(), player()];
+    const welcome = await a.join(await tokenFor(match.matchId, 'a'));
+    await b.join(await tokenFor(match.matchId, 'b'));
+    a.send({ type: 'ready' });
+    b.send({ type: 'ready' });
+    await a.next('started');
+    return { match, a, b, welcome };
+  };
+
+  it('memory: a card face reaches the player only when it is flipped', async () => {
+    const { match, a, b } = await race({});
+    const [[x, y], [z]] = await deckOf(match.matchId);
+    await a.next('state');
+    const seq = a.act('FLIP', { index: z });
+    await a.next('ack', (m) => m.seq === seq);
+    const after = (await a.next('state', (m) => (m.state as MemoryMatchState).revealed.length === 1)).state as MemoryMatchState;
+    expect(after.cards.filter((c) => c.face !== '').map((c) => c.face)).toHaveLength(1);
+    expect(after.cards[z].face).not.toBe('');
+    expect(after.cards[x].face).toBe('');
+    expect(after.cards[y].face).toBe('');
+
+    // Nothing Bayo receives carries Ada's board.
+    await sleep(50);
+    expect(b.messages.filter((m) => m.type === 'state').every((m) => (m.state as MemoryMatchState).cards.every((c) => c.face === ''))).toBe(true);
+  });
+
+  it('quiz: answers (including custom ones) are never sent before the question is answered', async () => {
+    const questions = [
+      { question: 'What does BRP stand for?', answer: 'Biometric Residence Permit', wrong: ['British Rail Pass', 'Border Return Paper'] },
+      { question: 'What is an IHS?', answer: 'Immigration Health Surcharge', wrong: ['Internal Home Survey', 'Initial Housing Scheme'] },
+      { question: 'What is a CAS?', answer: 'Confirmation of Acceptance for Studies', wrong: ['Certified Academic Score', 'Campus Access Slip'] },
+    ];
+    const { a, welcome } = await race({ gameId: 'game_quiz_001', config: { questions, questionCount: 3 } });
+    expect(welcome.play.config).toBeUndefined();
+    const everythingA = () => JSON.stringify(a.messages);
+
+    const first = (await a.next('state')).state as { questions: { question: string; options: string[]; correctIndex: number }[]; index: number };
+    expect(first.questions[0].correctIndex).toBe(-1);
+    expect(first.questions.slice(1).every((q) => q.question === '' && q.options.length === 0)).toBe(true);
+    // The two answers still to come appear nowhere in what Ada has received.
+    const current = first.questions[0].question;
+    const later = questions.filter((q) => q.question !== current);
+    for (const q of later) expect(everythingA()).not.toContain(q.answer);
+
+    const seq = a.act('ANSWER', { qIndex: 0, choice: 0 });
+    await a.next('ack', (m) => m.seq === seq);
+    const next = (await a.next('state', (m) => (m.state as { index: number }).index === 1)).state as typeof first;
+    expect(next.questions[0].correctIndex).toBeGreaterThanOrEqual(0); // revealed after answering
+    expect(next.questions[1].question).not.toBe('');
+    expect(next.questions[1].correctIndex).toBe(-1);
+  });
+
+  it('open-information games still get the seed and resume from the moves', async () => {
+    const { welcome } = await race({ gameId: 'game_sudoku_001', config: { variant: '4x4' } });
+    expect(welcome.play.hidden).toBe(false);
+    expect(welcome.play.seed).toMatch(/^[0-9a-f]{32}$/);
+    expect(welcome.play.config).toMatchObject({ variant: '4x4' });
+    expect(welcome.state).toBeUndefined();
   });
 
   it('rejects bad tokens and solo session tokens', async () => {

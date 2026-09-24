@@ -331,6 +331,40 @@ describe('SageGames API', () => {
         .send({ gameId: 'game_quiz_001', externalUserId: 'u', config: { bankId: 'nope' } });
       expect(missing.status).toBe(400);
     });
+
+    it('lets developers manage banks from the portal, only for their own apps', async () => {
+      const { dev, appId, key } = await setupApp(env);
+      const base = `/portal/api/apps/${appId}/quiz-banks`;
+      const q = (n: number) => ({ question: `Question ${n}?`, answer: `Right ${n}`, wrong: [`Wrong ${n}a`, `Wrong ${n}b`], difficulty: 'easy' });
+
+      const saved = await env.api.put(`${base}/visa-basics`).set(auth(dev.token)).send({ name: 'Visa basics', questions: [q(1), q(2)] });
+      expect(saved.status).toBe(200);
+      expect(saved.body).toMatchObject({ bankId: 'visa-basics', name: 'Visa basics', questionCount: 2 });
+
+      const list = await env.api.get(base).set(auth(dev.token));
+      expect(list.body.map((b: { bankId: string }) => b.bankId)).toEqual(['visa-basics']);
+      const bank = await env.api.get(`${base}/visa-basics`).set(auth(dev.token));
+      expect(bank.body.questions[1]).toMatchObject({ question: 'Question 2?', answer: 'Right 2', wrong: ['Wrong 2a', 'Wrong 2b'], difficulty: 'easy' });
+
+      // Replacing keeps one bank; the host API sees the same data.
+      await env.api.put(`${base}/visa-basics`).set(auth(dev.token)).send({ name: 'Visa basics', questions: [q(1), q(2), q(3)] });
+      expect((await env.api.get('/v2/quiz-banks/visa-basics').set(auth(key))).body.questions).toHaveLength(3);
+
+      // Mistakes come back with the question number.
+      const bad = await env.api.put(`${base}/visa-basics`).set(auth(dev.token)).send({ questions: [q(1), { question: 'No wrongs?', answer: 'x', wrong: [] }] });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toMatch(/^Question 2: wrong must have 1 to 5 answers/);
+      expect((await env.api.put(`${base}/bad id!`).set(auth(dev.token)).send({ questions: [q(1)] })).body.code).toBe('invalid_bank_id');
+
+      // Another developer can't see or change them.
+      const stranger = await env.signIn();
+      expect((await env.api.get(base).set(auth(stranger.token))).status).toBe(404);
+      expect((await env.api.put(`${base}/visa-basics`).set(auth(stranger.token)).send({ questions: [q(9)] })).status).toBe(404);
+      expect((await env.api.delete(`${base}/visa-basics`).set(auth(stranger.token))).status).toBe(404);
+
+      expect((await env.api.delete(`${base}/visa-basics`).set(auth(dev.token))).status).toBe(204);
+      expect((await env.api.get(base).set(auth(dev.token))).body).toEqual([]);
+    });
   });
 
   describe('webhooks', () => {

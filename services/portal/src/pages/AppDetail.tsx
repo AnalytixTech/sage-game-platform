@@ -1,11 +1,13 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, ApiKey, AppSummary, Game, json, listGames, PortalConfig, UsageDay, WebhookInfo } from '../api';
 import { GamePicker } from './Apps';
+import { QuizBanksTab } from './QuizBanks';
 
 const TABS = [
   ['keys', 'API keys'],
   ['games', 'Games'],
   ['webhook', 'Webhook'],
+  ['quiz', 'Quiz banks'],
   ['usage', 'Usage'],
   ['quickstart', 'Quickstart'],
 ] as const;
@@ -66,6 +68,7 @@ export function AppDetailPage({ appId, tab, config }: { appId: string; tab: stri
       {tab === 'keys' && <KeysTab app={app} onChange={reload} />}
       {tab === 'games' && <GamesTab app={app} onChange={reload} />}
       {tab === 'webhook' && <WebhookTab appId={appId} />}
+      {tab === 'quiz' && <QuizBanksTab appId={appId} />}
       {tab === 'usage' && <UsageTab appId={appId} />}
       {tab === 'quickstart' && <QuickstartTab config={config} />}
       {tab === 'settings' && <SettingsTab app={app} />}
@@ -228,7 +231,7 @@ function WebhookTab({ appId }: { appId: string }) {
   return (
     <div className="stack">
       <p className="muted">
-        We POST <code>session.completed</code> events here with the verified score, signed with a <code>Sage-Signature</code> header.
+        We POST <code>session.completed</code> and <code>match.finished</code> events here with the verified score, signed with a <code>Sage-Signature</code> header.
       </p>
       {error && <p className="error">{error}</p>}
       <form className="card row wrap" onSubmit={save}>
