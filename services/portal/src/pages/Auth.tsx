@@ -1,5 +1,37 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, ReactNode, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { Link } from '../router';
+import { Icon } from '../ui';
+
+/** Split layout: the product on the left, the form on the right (stacked on phones). */
+function AuthLayout({ children }: { children: ReactNode }) {
+  return (
+    <div className="auth-page">
+      <section className="auth-hero">
+        <div className="row" style={{ gap: 10 }}>
+          <span className="brand-mark" style={{ background: 'rgba(255,255,255,.2)' }}>◆</span>
+          <strong>SageGames Developers</strong>
+        </div>
+        <div>
+          <h1>Five polished games your players will love, in an afternoon.</h1>
+          <p>Drop-in React Native and web SDKs, scores the server verifies, live battles and a theme that matches your app.</p>
+          <div className="auth-tiles" aria-hidden>
+            {['🧠', '🃏', '🔢', '🔎', '⚡'].map((g) => (
+              <div key={g} className="auth-tile">{g}</div>
+            ))}
+          </div>
+          <div className="auth-points">
+            <div><Icon name="check" size={16} /> Every score replayed and verified on the server</div>
+            <div><Icon name="check" size={16} /> 2 to 16 player battles for chats and groups</div>
+            <div><Icon name="check" size={16} /> Presets, your brand colour, or your own components</div>
+          </div>
+        </div>
+        <Link to="/docs" style={{ color: '#fff', fontWeight: 600 }}>Read the documentation →</Link>
+      </section>
+      <section className="auth-panel">{children}</section>
+    </div>
+  );
+}
 
 type Mode = 'signin' | 'signup' | 'forgot';
 
@@ -47,6 +79,7 @@ export function AuthPage({ supabase }: { supabase: SupabaseClient }) {
   };
 
   return (
+    <AuthLayout>
     <div className="auth">
       <h1>{titles[mode]}</h1>
       <p className="muted">
@@ -94,6 +127,7 @@ export function AuthPage({ supabase }: { supabase: SupabaseClient }) {
         )}
       </div>
     </div>
+    </AuthLayout>
   );
 }
 
@@ -113,6 +147,7 @@ export function ResetPasswordPage({ supabase, onDone }: { supabase: SupabaseClie
   };
 
   return (
+    <AuthLayout>
     <div className="auth">
       <h1>Choose a new password</h1>
       {error && <p className="error">{error}</p>}
@@ -124,5 +159,6 @@ export function ResetPasswordPage({ supabase, onDone }: { supabase: SupabaseClie
         <button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save password'}</button>
       </form>
     </div>
+    </AuthLayout>
   );
 }

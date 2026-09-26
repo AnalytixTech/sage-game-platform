@@ -1,6 +1,6 @@
 {
   "name": "@sagegames/game-word-search",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Word Search Game Module for SageGame Platform with configurable categories and words",
   "repository": {
     "type": "git",
@@ -13,8 +13,8 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@sagegames/engine": "2.1.0",
-    "@sagegames/types": "2.1.0"
+    "@sagegames/engine": "2.2.0",
+    "@sagegames/types": "2.2.0"
   },
   "files": [
     "dist"

@@ -55,6 +55,18 @@ export interface UsageDay {
   verified: number;
 }
 
+export interface RecentResult {
+  sessionId: string;
+  gameId: string;
+  externalUserId: string;
+  displayName: string | null;
+  status: string;
+  valid: boolean;
+  isTest: boolean;
+  score: number;
+  completedAt: string;
+}
+
 export interface QuizBankSummary {
   bankId: string;
   name: string;

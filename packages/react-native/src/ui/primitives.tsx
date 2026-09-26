@@ -1,6 +1,13 @@
-import React, { ReactNode, useCallback, useState } from 'react';
-import { ActivityIndicator, LayoutChangeEvent, Pressable, StyleProp, Text, TextStyle, useWindowDimensions, View, ViewStyle } from 'react-native';
-import { SageTheme, useSage } from '@sagegames/react-headless';
+import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, LayoutChangeEvent, Pressable, StyleProp, Text, TextStyle, useWindowDimensions, View, ViewStyle } from 'react-native';
+import { SageTheme, touchTarget, useSage, useSlot, useSlotStyle } from '@sagegames/react-headless';
+import { Icon, IconName } from './icons';
+import { FadeSlide, Pop, Pulse, useMotion, usePressScale } from './motion';
+import { gradientStyle, shadowStyle, Surface, SurfaceProps, typeStyle } from './surfaces';
+
+export * from './surfaces';
+export * from './icons';
+export * from './motion';
 
 /**
  * Width available to a game board: the measured width of the view it's laid out in (so it fits
@@ -32,88 +39,150 @@ export function Button({
   onPress,
   variant = 'primary',
   disabled,
+  loading,
   style,
   compact,
+  icon,
   accessibilityLabel,
+  testID,
 }: {
   label: string;
   onPress: () => void;
   variant?: ButtonVariant;
   disabled?: boolean;
+  /** Shows a spinner and ignores presses. */
+  loading?: boolean;
   style?: StyleProp<ViewStyle>;
   compact?: boolean;
+  icon?: IconName;
   accessibilityLabel?: string;
+  testID?: string;
 }) {
   const { theme } = useSage();
+  const Custom = useSlot('Button');
+  const slotStyle = useSlotStyle<StyleProp<ViewStyle>>('button');
+  const press = usePressScale();
+  if (Custom) {
+    return (
+      <View style={style}>
+        <Custom label={label} onPress={onPress} variant={variant} disabled={disabled} loading={loading} compact={compact} icon={icon} accessibilityLabel={accessibilityLabel} />
+      </View>
+    );
+  }
   const c = theme.colors;
-  const bg = { primary: c.primary, secondary: c.surfaceAlt, ghost: 'transparent', danger: 'transparent' }[variant];
   const fg = { primary: c.onPrimary, secondary: c.text, ghost: c.text, danger: c.danger }[variant];
-  const border = variant === 'ghost' ? c.border : variant === 'danger' ? c.danger : bg;
+  const fill: ViewStyle =
+    variant === 'primary'
+      ? { ...gradientStyle(theme.gradients.primary), ...shadowStyle(theme, 'sm') }
+      : { backgroundColor: variant === 'secondary' ? c.surfaceAlt : 'transparent', borderWidth: 1, borderColor: variant === 'danger' ? c.danger : c.border };
+  const inactive = disabled || loading;
+  const minHeight = compact ? 40 : touchTarget(theme) + 4;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: !!disabled }}
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        {
-          backgroundColor: bg,
-          borderColor: border,
-          borderWidth: 1,
-          borderRadius: theme.radii.md,
-          paddingVertical: compact ? 8 : 13,
-          paddingHorizontal: compact ? 12 : 20,
-          alignItems: 'center',
-          justifyContent: 'center',
-          opacity: disabled ? 0.45 : pressed ? 0.8 : 1,
-        },
-        style,
-      ]}
-    >
-      <Text style={[{ color: fg, fontSize: compact ? 14 : 16 }, font(theme, 'bold')]}>{label}</Text>
-    </Pressable>
+    <Animated.View style={[press.style, { opacity: disabled ? 0.45 : 1 }, style]}>
+      <Pressable
+        testID={testID}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? label}
+        accessibilityState={{ disabled: !!inactive, busy: !!loading }}
+        onPress={onPress}
+        disabled={inactive}
+        {...press.handlers}
+        style={[
+          fill,
+          {
+            minHeight,
+            borderRadius: theme.radii.md,
+            paddingHorizontal: compact ? 14 : 22,
+            flexDirection: 'row',
+            gap: 8,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          slotStyle,
+        ]}
+      >
+        {loading ? <ActivityIndicator color={fg} size="small" /> : icon ? <Icon name={icon} size={compact ? 14 : 16} color={fg} /> : null}
+        <Text style={[{ color: fg, fontSize: compact ? 14 : 16, letterSpacing: 0.2 }, font(theme, 'bold')]}>{label}</Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 
-export function Card({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+/** Round icon-only button (pause, close). */
+export function IconButton({ icon, onPress, label, disabled }: { icon: IconName; onPress: () => void; label: string; disabled?: boolean }) {
   const { theme } = useSage();
+  const press = usePressScale(0.9);
   return (
-    <View
-      style={[
-        {
-          backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
-          borderWidth: 1,
-          borderRadius: theme.radii.lg,
-          padding: theme.spacing.lg,
-        },
-        style,
-      ]}
-    >
-      {children}
-    </View>
+    <Animated.View style={press.style}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={onPress}
+        disabled={disabled}
+        hitSlop={6}
+        {...press.handlers}
+        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.surfaceAlt, borderWidth: 1, borderColor: theme.colors.border }}
+      >
+        <Icon name={icon} size={15} color={theme.colors.text} />
+      </Pressable>
+    </Animated.View>
   );
 }
 
-export function Stat({ label, value, align = 'flex-start' }: { label: string; value: string | number; align?: 'flex-start' | 'center' | 'flex-end' }) {
+/** A themed card (see Surface for elevation and gradients). */
+export function Card({
+  children,
+  style,
+  elevation = 'md',
+  gradient,
+}: {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  elevation?: SurfaceProps['elevation'];
+  gradient?: SurfaceProps['gradient'];
+}) {
+  return (
+    <Surface style={style} elevation={elevation} gradient={gradient}>
+      {children}
+    </Surface>
+  );
+}
+
+export function Stat({ label, value, align = 'flex-start', icon }: { label: string; value: string | number; align?: 'flex-start' | 'center' | 'flex-end'; icon?: IconName }) {
   const { theme } = useSage();
   return (
     <View style={{ alignItems: align }}>
-      <Text style={[{ color: theme.colors.textMuted, fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase' }, font(theme, 'medium')]}>
-        {label}
-      </Text>
-      <Text style={[{ color: theme.colors.text, fontSize: 20, fontVariant: ['tabular-nums'] }, font(theme, 'bold')]}>{value}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        {icon && <Icon name={icon} size={11} color={theme.colors.textMuted} />}
+        <Text style={[typeStyle(theme, theme.typography.caption), { color: theme.colors.textMuted, textTransform: 'uppercase' }]}>{label}</Text>
+      </View>
+      <Pop trigger={value}>
+        <Text style={[typeStyle(theme, theme.typography.numeric), { color: theme.colors.text, fontVariant: ['tabular-nums'] }]}>{value}</Text>
+      </Pop>
     </View>
   );
 }
 
-export function ProgressBar({ fraction, color }: { fraction: number; color?: string }) {
+/** Animated bar; uses the primary gradient unless given a colour. */
+export function ProgressBar({ fraction, color, height = 8 }: { fraction: number; color?: string; height?: number }) {
   const { theme } = useSage();
-  const pct = `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` as const;
+  const motion = useMotion();
+  const target = Math.min(1, Math.max(0, fraction));
+  const width = useRef(new Animated.Value(target)).current;
+  const { reduced } = motion;
+  const fast = motion.ms('fast');
+  useEffect(() => {
+    if (reduced) width.setValue(target);
+    else Animated.timing(width, { toValue: target, duration: fast, useNativeDriver: false }).start();
+  }, [target, reduced, fast, width]);
+  const fill = color ? { backgroundColor: color } : gradientStyle(theme.gradients.primary, 90);
   return (
-    <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.surfaceAlt, overflow: 'hidden' }}>
-      <View style={{ width: pct, height: 6, backgroundColor: color ?? theme.colors.primary }} />
+    <View
+      accessibilityRole="progressbar"
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(target * 100) }}
+      style={{ height, borderRadius: height / 2, backgroundColor: theme.colors.surfaceAlt, overflow: 'hidden' }}
+    >
+      <Animated.View style={[fill, { height, borderRadius: height / 2, width: width.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} />
     </View>
   );
 }
@@ -121,28 +190,31 @@ export function ProgressBar({ fraction, color }: { fraction: number; color?: str
 export function Loading({ label }: { label: string }) {
   const { theme } = useSage();
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', padding: theme.spacing.xl, gap: theme.spacing.md }}>
-      <ActivityIndicator color={theme.colors.primary} size="large" />
-      <Text style={[{ color: theme.colors.textMuted, fontSize: 15 }, font(theme, 'regular')]}>{label}</Text>
-    </View>
+    <FadeSlide from="none" style={{ alignItems: 'center', justifyContent: 'center', padding: theme.spacing.xl, gap: theme.spacing.md }}>
+      <Pulse active>
+        <View style={[{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' }, gradientStyle(theme.gradients.primary), shadowStyle(theme, 'md')]}>
+          <ActivityIndicator color={theme.colors.onPrimary} />
+        </View>
+      </Pulse>
+      <Text style={[typeStyle(theme, theme.typography.body), { color: theme.colors.textMuted }]}>{label}</Text>
+    </FadeSlide>
   );
 }
 
-export function Heading({ children, size = 20 }: { children: ReactNode; size?: number }) {
+export function Heading({ children, size }: { children: ReactNode; size?: number }) {
   const { theme } = useSage();
-  return <Text style={[{ color: theme.colors.text, fontSize: size }, font(theme, 'bold')]}>{children}</Text>;
+  const token = size && size >= 22 ? theme.typography.title : theme.typography.heading;
+  return (
+    <Text style={[typeStyle(theme, token), { color: theme.colors.text }, size ? { fontSize: size, lineHeight: Math.round(size * token.lineHeight) } : null]}>
+      {children}
+    </Text>
+  );
 }
 
 export function Body({ children, muted, center, style }: { children: ReactNode; muted?: boolean; center?: boolean; style?: StyleProp<TextStyle> }) {
   const { theme } = useSage();
   return (
-    <Text
-      style={[
-        { color: muted ? theme.colors.textMuted : theme.colors.text, fontSize: 15, lineHeight: 21, textAlign: center ? 'center' : 'left' },
-        font(theme, 'regular'),
-        style,
-      ]}
-    >
+    <Text style={[typeStyle(theme, theme.typography.body), { color: muted ? theme.colors.textMuted : theme.colors.text, textAlign: center ? 'center' : 'left' }, style]}>
       {children}
     </Text>
   );

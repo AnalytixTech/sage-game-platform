@@ -1,6 +1,6 @@
 {
   "name": "@sagegames/types",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Core TypeScript definitions and contracts for SageGame Platform",
   "repository": {
     "type": "git",
