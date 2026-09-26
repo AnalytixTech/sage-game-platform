@@ -3,6 +3,7 @@
  * everything about selection, input and timers lives here.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSageOptional } from '../provider';
 import type { MemoryMatchState } from '@sagegames/game-memory-match';
 import type { QuizState } from '@sagegames/game-quiz-master';
 import { isWrongEntry, SudokuState } from '@sagegames/game-sudoku';
@@ -184,43 +185,127 @@ export type GridCell = [row: number, col: number];
 
 const same = (a: GridCell | null, b: GridCell | null) => !!a && !!b && a[0] === b[0] && a[1] === b[1];
 
+/** Where a word selection stands, between pointer events. */
+export interface SelectionState {
+  /** First letter of a selection (drag start, or the first of two taps). */
+  anchor: GridCell | null;
+  hover: GridCell | null;
+  dragging: boolean;
+  /** The current press, when it started with no anchor (it may turn out to be a tap on a found word). */
+  press: { cell: GridCell; moved: boolean } | null;
+}
+
+export type SelectionEffect = { type: 'commit'; from: GridCell; to: GridCell } | { type: 'define'; word: number } | null;
+
+export interface SelectionContext {
+  /** Game over (or otherwise not accepting moves): only definition taps work. */
+  readOnly: boolean;
+  /** The found word with a definition to show for a cell (most recently found wins), or null. */
+  definedWordAt: (cell: GridCell) => number | null;
+}
+
+export const emptySelection: SelectionState = { anchor: null, hover: null, dragging: false, press: null };
+
+/**
+ * Pointer events → selection, commits and definition taps. The rule:
+ * - a tap is a press and release on the same cell, with no move to another cell;
+ * - a tap with no anchor on a found word (that has a definition) opens the definition, cancels
+ *   any selection and dispatches nothing;
+ * - with an anchor, a tap completes or cancels the selection exactly as before;
+ * - drags are unchanged, including drags that start on a found word.
+ */
+export function selectionStep(
+  s: SelectionState,
+  event: { type: 'down' | 'move' | 'up'; cell: GridCell | null } | { type: 'cancel' },
+  ctx: SelectionContext
+): [SelectionState, SelectionEffect] {
+  if (event.type === 'cancel') return [emptySelection, null];
+  const cell = event.cell;
+
+  if (event.type === 'down') {
+    if (!cell) return [s, null];
+    if (ctx.readOnly) return [{ ...emptySelection, press: { cell, moved: false } }, null];
+    if (s.anchor && !same(s.anchor, cell)) return [emptySelection, { type: 'commit', from: s.anchor, to: cell }]; // second tap
+    if (same(s.anchor, cell)) return [emptySelection, null]; // tapping the anchor again cancels
+    return [{ anchor: cell, hover: cell, dragging: true, press: { cell, moved: false } }, null];
+  }
+
+  if (event.type === 'move') {
+    if (!cell) return [s, null];
+    const press = s.press && !same(s.press.cell, cell) ? { ...s.press, moved: true } : s.press;
+    if (ctx.readOnly) return [{ ...s, press }, null];
+    return [{ ...s, press, hover: s.dragging && !same(s.hover, cell) ? cell : s.hover }, null];
+  }
+
+  // up
+  const press = s.press;
+  if (press && !press.moved && cell && same(cell, press.cell)) {
+    const word = ctx.definedWordAt(cell);
+    if (word !== null) return [emptySelection, { type: 'define', word }];
+  }
+  if (ctx.readOnly) return [emptySelection, null];
+  const next: SelectionState = { ...s, dragging: false, press: null };
+  if (s.dragging && s.anchor && cell && !same(s.anchor, cell)) return [emptySelection, { type: 'commit', from: s.anchor, to: cell }];
+  return [next, null]; // a plain tap leaves the anchor for tap-tap selection
+}
+
+/** The found word (with a definition) to show for a cell: the most recently found one. */
+export function definedWordAt(state: WordSearchState, foundOrder: number[], cell: GridCell): number | null {
+  const idx = cell[0] * state.size + cell[1];
+  for (let k = foundOrder.length - 1; k >= 0; k--) {
+    const w = state.words[foundOrder[k]];
+    if (w?.found && w.definition && w.cells.includes(idx)) return foundOrder[k];
+  }
+  return null;
+}
+
+export interface WordDefinitionInfo {
+  index: number;
+  word: string;
+  definition: string;
+  note?: string;
+}
+
 /**
  * Selection by drag (press on the first letter, release on the last) or by two taps
- * (tap the first letter, then the last).
+ * (tap the first letter, then the last). Tapping a found word shows its definition.
+ * Pass `readOnly` once the game is over so only definition taps work.
  */
-export function useWordSearch(state: WordSearchState, dispatch: Dispatch) {
-  const [anchor, setAnchor] = useState<GridCell | null>(null);
-  const [hover, setHover] = useState<GridCell | null>(null);
-  const dragging = useRef(false);
+export function useWordSearch(state: WordSearchState, dispatch: Dispatch, options: { readOnly?: boolean } = {}) {
+  const sage = useSageOptional();
+  const [, render] = useState(0);
+  const sel = useRef<SelectionState>(emptySelection);
+  const [definition, setDefinition] = useState<WordDefinitionInfo | null>(null);
 
-  const commit = (from: GridCell, to: GridCell) => {
-    dispatch('SELECT', { from, to });
-    setAnchor(null);
-    setHover(null);
+  // Order words were found in, so a cell shared by two found words shows the latest.
+  const order = useRef<number[]>(state.words.map((w, i) => (w.found ? i : -1)).filter((i) => i >= 0));
+  state.words.forEach((w, i) => {
+    if (w.found && !order.current.includes(i)) order.current.push(i);
+  });
+
+  const show = useCallback(
+    (index: number) => {
+      const w = state.words[index];
+      if (!w?.found || !w.definition) return; // unfound words and words without a definition open nothing
+      setDefinition({ index, word: w.display, definition: w.definition, ...(w.note ? { note: w.note } : {}) });
+      sage?.onWordDefinition?.({ gameId: 'game_word_search_001', word: w.display });
+    },
+    [state.words, sage]
+  );
+
+  const step = (event: Parameters<typeof selectionStep>[1]) => {
+    const [next, effect] = selectionStep(sel.current, event, {
+      readOnly: !!options.readOnly,
+      definedWordAt: (cell) => definedWordAt(state, order.current, cell),
+    });
+    const changed = next.anchor !== sel.current.anchor || next.hover !== sel.current.hover;
+    sel.current = next;
+    if (effect?.type === 'commit') dispatch('SELECT', { from: effect.from, to: effect.to });
+    if (effect?.type === 'define') show(effect.word);
+    if (changed || effect) render((n) => n + 1);
   };
 
-  const pointerDown = (cell: GridCell) => {
-    if (anchor && !same(anchor, cell)) return commit(anchor, cell); // second tap
-    if (same(anchor, cell)) {
-      setAnchor(null); // tapping the anchor again cancels
-      setHover(null);
-      return;
-    }
-    setAnchor(cell);
-    setHover(cell);
-    dragging.current = true;
-  };
-
-  const pointerMove = (cell: GridCell) => {
-    if (dragging.current && !same(hover, cell)) setHover(cell);
-  };
-
-  const pointerUp = (cell: GridCell | null) => {
-    const wasDragging = dragging.current;
-    dragging.current = false;
-    if (wasDragging && anchor && cell && !same(anchor, cell)) commit(anchor, cell);
-  };
-
+  const { anchor, hover } = sel.current;
   const preview = useMemo(() => {
     if (!anchor) return new Set<number>();
     const cells = hover ? selectionCells(state.size, anchor, hover) : null;
@@ -239,14 +324,19 @@ export function useWordSearch(state: WordSearchState, dispatch: Dispatch) {
     anchor,
     preview,
     foundCells,
-    pointerDown,
-    pointerMove,
-    pointerUp,
-    cancel: () => {
-      dragging.current = false;
-      setAnchor(null);
-      setHover(null);
-    },
+    pointerDown: (cell: GridCell) => step({ type: 'down', cell }),
+    pointerMove: (cell: GridCell) => step({ type: 'move', cell }),
+    pointerUp: (cell: GridCell | null) => step({ type: 'up', cell }),
+    cancel: () => step({ type: 'cancel' }),
+    /** The definition open right now, if any. */
+    definition,
+    /** Open a found word's definition (e.g. from its chip). */
+    showDefinition: show,
+    closeDefinition: () => setDefinition(null),
+    /** Whether a word's chip opens a definition. */
+    canDefine: (index: number) => !!state.words[index]?.found && !!state.words[index]?.definition,
+    /** Whether any found word has a definition (to show the hint). */
+    hasDefinitions: state.words.some((w) => w.found && !!w.definition),
   };
 }
 

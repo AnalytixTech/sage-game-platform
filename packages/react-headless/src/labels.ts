@@ -27,6 +27,14 @@ export const defaultLabels = {
   pauseAnytime: 'Pause anytime',
   newBest: 'Top of the board!',
   battleChip: 'Battle',
+  // Review (after a game ends)
+  continue: 'Continue',
+  reviewFinished: 'Finished!',
+  reviewQuit: 'Game over',
+  // Word search definitions
+  gotIt: 'Got it',
+  definitionHint: 'Tap a found word to see its meaning',
+  definitionA11yHint: 'Shows the meaning',
   // Quiz
   question: 'Question',
   correct: 'Correct!',

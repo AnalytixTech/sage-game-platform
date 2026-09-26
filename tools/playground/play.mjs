@@ -66,9 +66,19 @@ async function cellCenter(testId, n, row, col, gap = 0, border = 1) {
     await page.getByTestId(`memory-card-${b}`).click();
     await page.waitForTimeout(250);
   }
+  // 2.3: the finished board stays up with a summary and Continue while the score is verified.
+  await page.getByTestId('sage-review-continue').waitFor({ timeout: 5000 });
+  await page.waitForTimeout(400);
+  await shot('memory_3_review');
+  const r = await text();
+  check(r.includes('Finished!') && r.includes('Continue'), 'memory: review shows the finished board with Continue');
+  check(!r.includes('Your score'), 'memory: result waits for Continue');
+  await page.getByTestId('memory-card-0').click({ force: true });
+  check((await text()).includes('Finished!'), 'memory: taps on the review board change nothing');
+  await page.getByTestId('sage-review-continue').click();
   await page.getByText('Your score', { exact: false }).waitFor({ timeout: 5000 });
   await page.waitForTimeout(1300); // the score counts up and confetti settles
-  await shot('memory_3_result');
+  await shot('memory_4_result');
   const t = await text();
   check(t.includes('800'), 'memory: server-verified score shown (6 pairs, one missed pair loses its bonus = 800)');
   check(t.includes('Leaderboard') && t.includes('Amara'), 'memory: chat leaderboard shown on the result screen');
@@ -109,12 +119,40 @@ async function cellCenter(testId, n, row, col, gap = 0, border = 1) {
   check(/MISTAKES\s*1/i.test(t), 'sudoku: wrong digit counts a mistake');
 }
 
+// ---- Review after quitting (Sudoku launcher), and the 2.2 flow with reviewBeforeResult={false}
+{
+  await page.goto(`${BASE}?${EXTRA.slice(1)}&view=launcher&game=game_sudoku_001`, { waitUntil: 'networkidle' });
+  await page.getByText('Play', { exact: true }).click();
+  await page.getByTestId('sudoku-cell-0').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'End game', exact: true }).first().click();
+  await page.getByRole('button', { name: 'End game', exact: true }).last().click();
+  await page.getByTestId('sage-review-continue').waitFor({ timeout: 5000 });
+  check((await text()).includes('Game over'), 'review: quitting shows the board with "Game over"');
+  await page.getByTestId('sage-review-continue').click();
+  await page.getByText('Your score', { exact: false }).waitFor({ timeout: 5000 });
+  check(true, 'review: Continue after quitting shows the result');
+
+  await page.goto(`${BASE}?${EXTRA.slice(1)}&view=launcher&game=game_sudoku_001&review=0`, { waitUntil: 'networkidle' });
+  await page.getByText('Play', { exact: true }).click();
+  await page.getByTestId('sudoku-cell-0').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'End game', exact: true }).first().click();
+  await page.getByRole('button', { name: 'End game', exact: true }).last().click();
+  await page.getByText('Your score', { exact: false }).waitFor({ timeout: 5000 });
+  check((await page.getByTestId('sage-review-continue').count()) === 0, 'review: reviewBeforeResult={false} goes straight to the result');
+}
+
 // ---- Word search: drag across one word, tap-tap another
 {
   const config = {
     categoryName: 'Custom Terms',
     wordSelectionMode: 'combine',
-    words: ['PASSPORT', 'VISA', 'IMMIGRATION', 'CAMPUS', 'SCHOLARSHIP'].map((t) => ({ token: t, display: t[0] + t.slice(1).toLowerCase() })),
+    words: [
+      { token: 'PASSPORT', display: 'Passport', definition: 'An official document that proves who you are when you travel abroad' },
+      { token: 'VISA', display: 'Visa', definition: 'Permission from a country to enter, stay or study there', note: 'Apply early: processing can take weeks.' },
+      { token: 'IMMIGRATION', display: 'Immigration', definition: 'Moving to live permanently in another country' },
+      { token: 'CAMPUS', display: 'Campus', definition: 'The grounds and buildings of a university or college' },
+      { token: 'SCHOLARSHIP', display: 'Scholarship', definition: 'Money given to a student to help pay for their education' },
+    ],
     gridSize: 10,
     difficulty: 'medium',
   };
@@ -139,6 +177,40 @@ async function cellCenter(testId, n, row, col, gap = 0, border = 1) {
   await page.waitForTimeout(150);
   await shot('wordsearch_1_found');
   check((await text()).includes('2/13'), 'word search: drag and tap-tap both find words (2/13)');
+  check((await text()).includes('Tap a found word to see its meaning'), 'word search: definition hint shown once a found word has one');
+
+  // 2.3: tap a found word's letter → its definition; nothing is dispatched.
+  const own = w1.cells.find((i) => !w2.cells.includes(i));
+  const p = await cellCenter('word-search-grid', n, ...rc(own), 0, 0);
+  await page.mouse.click(p.x, p.y);
+  await page.getByTestId('word-definition').waitFor({ timeout: 3000 });
+  await page.waitForTimeout(400); // fade-in
+  await shot('wordsearch_2_definition');
+  let t = await text();
+  check(t.includes('Moving to live permanently in another country'), 'word search: tapping a found word in the grid shows its definition');
+  await page.getByTestId('word-definition-dismiss').click();
+  await page.getByTestId('word-definition').waitFor({ state: 'detached', timeout: 3000 });
+  check((await text()).includes('2/13'), 'word search: a definition tap dispatches nothing (still 2/13)');
+
+  // The chip of a found word opens it too (with the note), and the backdrop closes it.
+  await page.getByTestId(`word-chip-${state.words.indexOf(w2)}`).click();
+  await page.getByTestId('word-definition').waitFor({ timeout: 3000 });
+  t = await text();
+  check(t.includes('Permission from a country') && t.includes('Apply early'), 'word search: a found chip shows the definition and note');
+  await page.mouse.click(8, 8);
+  await page.getByTestId('word-definition').waitFor({ state: 'detached', timeout: 3000 });
+  check(true, 'word search: the backdrop dismisses the definition');
+
+  // Unfound words give no hint.
+  const unfound = state.words.findIndex((w) => w.token === 'CAMPUS');
+  await page.getByTestId(`word-chip-${unfound}`).click({ force: true });
+  await page.waitForTimeout(200);
+  check((await page.getByTestId('word-definition').count()) === 0, 'word search: an unfound word opens nothing');
+  const u = await cellCenter('word-search-grid', n, ...rc(state.words[unfound].cells[1]), 0, 0);
+  await page.mouse.click(u.x, u.y);
+  await page.waitForTimeout(200);
+  check((await page.getByTestId('word-definition').count()) === 0, 'word search: tapping an unfound word in the grid opens nothing');
+  await page.mouse.click(u.x, u.y); // cancel the anchor again
 }
 
 // ---- Word rush: drag a real word, and tap another

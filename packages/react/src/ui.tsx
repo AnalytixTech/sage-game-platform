@@ -48,6 +48,7 @@ export function SageStyles() {
       .sg-press:not(:disabled):hover { filter: brightness(1.06); }
       .sg-press:not(:disabled):active { transform: scale(0.96); }
       .sg-spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid ${rgba(c.onPrimary, 0.35)}; border-top-color: ${c.onPrimary}; animation: sg-spin 0.8s linear infinite; }
+      .sg-spinner-sm { width: 14px; height: 14px; border-radius: 50%; border: 2px solid ${rgba(c.textMuted, 0.3)}; border-top-color: ${c.textMuted}; animation: sg-spin 0.8s linear infinite; }
       .sg-card-face { transition: transform 0.18s ease, background-color 0.18s ease; }
       @keyframes sg-spin { to { transform: rotate(360deg); } }
       @keyframes sg-pop { 0% { transform: scale(1); } 35% { transform: scale(1.14); } 70% { transform: scale(0.97); } 100% { transform: scale(1); } }

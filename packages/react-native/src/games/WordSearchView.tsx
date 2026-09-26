@@ -1,8 +1,56 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, Easing, GestureResponderEvent, PanResponder, Text, View } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, GestureResponderEvent, Modal, PanResponder, Pressable, StyleProp, Text, View, ViewStyle } from 'react-native';
 import type { WordSearchState } from '@sagegames/game-word-search';
-import { alpha, findEvent, GameViewProps, GridCell, useGameEvents, useWordSearch, wordSearchEvents } from '@sagegames/react-headless';
-import { Body, font, FloatUp, Pop, shadowStyle, Shake, Stat, useBoardWidth, useMotion } from '../ui/primitives';
+import {
+  alpha,
+  findEvent,
+  GameViewProps,
+  GridCell,
+  useGameEvents,
+  useSage,
+  useSlot,
+  useSlotStyle,
+  useWordSearch,
+  WordDefinitionSlotProps,
+  wordSearchEvents,
+} from '@sagegames/react-headless';
+import { Body, Button, font, FloatUp, Pop, shadowStyle, Shake, Stat, Surface, typeStyle, useBoardWidth, useMotion } from '../ui/primitives';
+
+/** The default definition popup: a themed card over a dimmed backdrop. */
+export function WordDefinitionPopup({ word, definition, note, color, onDismiss }: WordDefinitionSlotProps) {
+  const { theme, labels } = useSage();
+  const slotStyle = useSlotStyle<StyleProp<ViewStyle>>('wordDefinition');
+  const motion = useMotion();
+  const c = theme.colors;
+  useEffect(() => {
+    AccessibilityInfo.announceForAccessibility?.(`${word}. ${definition}`);
+  }, [word, definition]);
+  return (
+    <Modal transparent visible animationType={motion.reduced ? 'none' : 'fade'} onRequestClose={onDismiss} statusBarTranslucent>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: theme.spacing.lg }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={labels.close}
+          onPress={onDismiss}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: c.overlay }}
+        />
+        <View accessibilityViewIsModal accessibilityRole="alert" style={{ width: '100%', maxWidth: 380 }}>
+          <Surface tone="raised" elevation="lg" testID="word-definition" style={[{ gap: theme.spacing.md, borderTopWidth: 4, borderTopColor: color }, slotStyle]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: color }} />
+              <Text accessibilityRole="header" style={[typeStyle(theme, theme.typography.title), { color: c.text, flex: 1 }]}>
+                {word}
+              </Text>
+            </View>
+            <Text style={[typeStyle(theme, theme.typography.body), { color: c.text }]}>{definition}</Text>
+            {note ? <Text style={[typeStyle(theme, theme.typography.caption), { color: c.textMuted, letterSpacing: 0 }]}>{note}</Text> : null}
+            <Button label={labels.gotIt} onPress={onDismiss} testID="word-definition-dismiss" />
+          </Surface>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 /** A rounded bar from the centre of one cell to another, at any angle, drawn under the letters. */
 function Capsule({ from, to, cellSize, size, color, border, grow }: { from: number; to: number; cellSize: number; size: number; color: string; border?: string; grow?: boolean }) {
@@ -41,7 +89,8 @@ function Capsule({ from, to, cellSize, size, color, border, grow }: { from: numb
 }
 
 export function WordSearchView({ state, dispatch, theme, labels, paused, ended }: GameViewProps<WordSearchState>) {
-  const ws = useWordSearch(state, dispatch);
+  const ws = useWordSearch(state, dispatch, { readOnly: ended });
+  const CustomDefinition = useSlot('WordDefinition');
   const { events, seq } = useGameEvents(state, wordSearchEvents);
   const { width: maxWidth, onLayout } = useBoardWidth(480, theme.spacing.lg);
   const c = theme.colors;
@@ -64,7 +113,8 @@ export function WordSearchView({ state, dispatch, theme, labels, paused, ended }
 
   const handlers = useRef(ws);
   handlers.current = ws;
-  const disabled = paused || ended;
+  // Once the game is over the grid still takes taps, for definitions only (readOnly above).
+  const disabled = paused;
   const disabledRef = useRef(disabled);
   disabledRef.current = disabled;
 
@@ -163,13 +213,19 @@ export function WordSearchView({ state, dispatch, theme, labels, paused, ended }
       </View>
 
       <Body muted center style={{ fontSize: 13 }}>
-        Drag across a word, or tap its first and last letters.
+        {ended ? '' : 'Drag across a word, or tap its first and last letters.'}
+        {ws.hasDefinitions && !paused ? `${ended ? '' : ' '}${labels.definitionHint}.` : ''}
       </Body>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', width: boardWidth }}>
         {state.words.map((w, i) => (
           <Pop key={w.token} trigger={found?.word === i ? seq : null} peak={1.2}>
-            <View
+            <Pressable
+              disabled={!ws.canDefine(i) || paused}
+              onPress={() => ws.showDefinition(i)}
+              accessibilityRole={ws.canDefine(i) ? 'button' : undefined}
+              accessibilityHint={ws.canDefine(i) ? labels.definitionA11yHint : undefined}
+              testID={`word-chip-${i}`}
               style={{
                 paddingVertical: 6,
                 paddingHorizontal: 12,
@@ -182,10 +238,22 @@ export function WordSearchView({ state, dispatch, theme, labels, paused, ended }
               <Text style={[{ color: w.found ? '#1f2937' : c.text, fontSize: 14, textDecorationLine: w.found ? 'line-through' : 'none' }, font(theme, 'medium')]}>
                 {w.display}
               </Text>
-            </View>
+            </Pressable>
           </Pop>
         ))}
       </View>
+
+      {ws.definition &&
+        (() => {
+          const info: WordDefinitionSlotProps = {
+            word: ws.definition.word,
+            definition: ws.definition.definition,
+            ...(ws.definition.note ? { note: ws.definition.note } : {}),
+            color: palette[ws.definition.index % palette.length],
+            onDismiss: ws.closeDefinition,
+          };
+          return CustomDefinition ? <CustomDefinition {...info} /> : <WordDefinitionPopup {...info} />;
+        })()}
 
       {state.skippedWords.length > 0 && (
         <Body muted center style={{ fontSize: 12 }}>

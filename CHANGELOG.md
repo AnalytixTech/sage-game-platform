@@ -2,6 +2,28 @@
 
 All public packages share one version.
 
+## 2.3.0
+
+Additive: nothing breaks, and `reviewBeforeResult={false}` restores the 2.2 flow exactly.
+
+**Review before the result**
+
+- When a game ends (completed, time up or quit), the finished board stays on screen, read-only, with the score, the time, a key stat and a **Continue** button. Verification starts immediately in the background and shows its status inline ("Checking your score…", "Retrying…"); Continue shows the result, or the checking screen first if it's still running. "Play again" starts fresh.
+- Battles too: your finished board → Continue → waiting or standings.
+- New props on `GameLauncher` and `MatchLauncher` (both SDKs): `reviewBeforeResult` (default `true`) and `renderReview`. New label `continue`, slot style `review`. `useLauncher` and `useMatch` return `view` and `review`.
+- The submitted moves and end time are unchanged; `onComplete` fires as soon as the server answers.
+
+**Word Search definitions**
+
+- Tap a found word's letters, or its chip, to see its `definition` and `note` in a themed popup (dismiss with **Got it**, the backdrop, Escape or Android back). Works during play and on the review board. Unfound words give no hint.
+- The tap rule keeps selection intact: with a selection started, a tap still completes or cancels it; drags are unchanged. No new moves reach the replay and the clock is not paused.
+- New `WordDefinition` slot, `wordDefinition` slot style, labels `gotIt` and `definitionHint`, and the provider's `onWordDefinition({ gameId, word })` callback. Found chips are buttons with an accessibility hint; the popup is announced and keeps focus.
+
+**Docs**
+
+- `@sagegames/react-native` and `@sagegames/react` now ship a README and this changelog.
+- The documentation is public as plain Markdown for people and tools: `/portal/docs/llms.txt` lists every page and `/portal/docs/<page>.md` serves it (e.g. `/portal/docs/sdk.md`). The portal's docs pages stay readable without signing in.
+
 ## 2.2.0
 
 **Design and UX**

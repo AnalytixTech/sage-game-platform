@@ -18,6 +18,7 @@ export interface SageContextValue {
   reduceMotion?: boolean;
   components?: Partial<SlotComponents>;
   slotStyles?: SlotStyles;
+  onWordDefinition?: (info: { gameId: string; word: string }) => void;
 }
 
 const SageContext = createContext<SageContextValue | null>(null);
@@ -46,6 +47,8 @@ export interface SageGameProviderProps {
   components?: Partial<SlotComponents>;
   /** Extra styles for named parts (button, card, chip, header, intro, resultHero…). */
   slotStyles?: SlotStyles;
+  /** Called whenever a Word Search definition opens (analytics, text-to-speech…). */
+  onWordDefinition?: (info: { gameId: string; word: string }) => void;
 }
 
 export function SageGameProvider({
@@ -61,6 +64,7 @@ export function SageGameProvider({
   reduceMotion,
   components,
   slotStyles,
+  onWordDefinition,
 }: SageGameProviderProps) {
   const client = useMemo(() => new SageGameClient({ baseUrl, fetch: fetchImpl }), [baseUrl, fetchImpl]);
   // Keyed on the game ids, so an inline `games={[...]}` array doesn't rebuild the map every render.
@@ -75,10 +79,15 @@ export function SageGameProvider({
   const mergedLabels = useMemo(() => ({ ...defaultLabels, ...labels }), [labelsKey]);
 
   const value = useMemo<SageContextValue>(
-    () => ({ client, plugins, theme: mergedTheme, labels: mergedLabels, pendingStore, feedback, reduceMotion, components, slotStyles }),
-    [client, plugins, mergedTheme, mergedLabels, pendingStore, feedback, reduceMotion, components, slotStyles]
+    () => ({ client, plugins, theme: mergedTheme, labels: mergedLabels, pendingStore, feedback, reduceMotion, components, slotStyles, onWordDefinition }),
+    [client, plugins, mergedTheme, mergedLabels, pendingStore, feedback, reduceMotion, components, slotStyles, onWordDefinition]
   );
   return <SageContext.Provider value={value}>{children}</SageContext.Provider>;
+}
+
+/** The provider's value, or null outside a provider (for hooks that also work standalone). */
+export function useSageOptional(): SageContextValue | null {
+  return useContext(SageContext);
 }
 
 export function useSage(): SageContextValue {

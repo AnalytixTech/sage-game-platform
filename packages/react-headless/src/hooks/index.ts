@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { AnyGameRules, CompletionResult, Game, GameCategory, Leaderboard, MatchStanding, SessionCredentials } from '@sagegames/types';
 import {
   GameRuntime,
@@ -13,6 +13,7 @@ import {
   WebSocketLike,
 } from '@sagegames/core';
 import { useSage } from '../provider';
+import { EndReason, initialReview, launcherView, reviewReducer } from '../review';
 
 /** Run `fn` every `ms` while `active`. */
 export function useInterval(fn: () => void, ms: number, active: boolean) {
@@ -41,6 +42,19 @@ export interface UseLauncherOptions {
   onEvent?: (event: LauncherEvent) => void;
   /** Start as soon as the game is loaded instead of showing the intro card. */
   autoStart?: boolean;
+  /** Keep the finished board on screen with a Continue button before the result (default true). */
+  reviewBeforeResult?: boolean;
+}
+
+/** How a finished local game ended (from its action log). */
+function endReasonOf(runtime: LauncherState['runtime']): EndReason {
+  try {
+    const reason = runtime?.getLog().reason;
+    if (reason === 'completed' || reason === 'quit' || reason === 'timeout') return reason;
+  } catch {
+    // fall through
+  }
+  return runtime?.getSnapshot().over ? 'completed' : 'timeout';
 }
 
 /** Drives one game from session to verified result. */
@@ -83,8 +97,25 @@ export function useLauncher(options: UseLauncherOptions) {
   // Drive timers (question timeouts, countdowns) while playing.
   useInterval(() => controller.tick(), 250, state.phase === 'playing');
 
+  // The review only changes what is shown: submission starts exactly as before.
+  const reviewEnabled = options.reviewBeforeResult !== false;
+  const [review, sendReview] = useReducer(reviewReducer, initialReview);
+  useEffect(() => {
+    if (state.phase === 'loading' || state.phase === 'ready' || state.phase === 'playing') sendReview({ type: 'reset' });
+    else if (state.runtime?.getSnapshot().ended) sendReview({ type: 'ended', reason: endReasonOf(state.runtime) });
+  }, [state.phase, state.runtime]);
+
   return {
     state,
+    /** What to show: the launcher phase, or 'review' while the finished board is on screen. */
+    view: launcherView(state.phase, review, reviewEnabled),
+    review: {
+      reason: review.reason,
+      /** The score is still being verified. */
+      verifying: state.phase === 'submitting',
+      /** Move on from the review to "Checking your score…" or the result. */
+      continue: () => sendReview({ type: 'continue' }),
+    },
     plugin: state.play ? plugins.get(state.play.gameId) : undefined,
     controller,
     begin: () => controller.begin(),
@@ -164,6 +195,8 @@ export interface UseMatchOptions {
   onFinished?: (standings: MatchStanding[]) => void;
   /** Custom WebSocket factory (defaults to the global WebSocket). */
   createSocket?: (url: string) => WebSocketLike;
+  /** Keep your finished board on screen with a Continue button before waiting/standings (default true). */
+  reviewBeforeResult?: boolean;
 }
 
 /** Drives one online battle: lobby → countdown → race → standings. */
@@ -200,14 +233,45 @@ export function useMatch(options: UseMatchOptions) {
   useInterval(() => setTick((n) => n + 1), 100, state.phase === 'countdown');
 
   const me = state.match?.players.find((p) => p.playerId === state.you) ?? null;
+
+  // Review: your board stays up after you finish, until Continue.
+  const reviewEnabled = options.reviewBeforeResult !== false;
+  const [review, sendReview] = useReducer(reviewReducer, initialReview);
+  const wasPlaying = useRef(false);
+  const forfeited = useRef(false);
+  useEffect(() => {
+    if (state.phase === 'playing') {
+      wasPlaying.current = true;
+      forfeited.current = false;
+      sendReview({ type: 'reset' });
+    } else if (wasPlaying.current && (state.phase === 'waiting' || state.phase === 'finished') && state.runtime) {
+      wasPlaying.current = false;
+      const snap = state.runtime.getSnapshot();
+      const reason: EndReason = forfeited.current || me?.status === 'forfeited' ? 'quit' : snap.over ? 'completed' : 'timeout';
+      sendReview({ type: 'ended', reason });
+    }
+  }, [state.phase, state.runtime, me?.status]);
+  const reviewing = reviewEnabled && review.stage === 'review' && (state.phase === 'waiting' || state.phase === 'finished');
+
   return {
     state,
     me,
+    /** What to show: the match phase, or 'review' while your finished board is on screen. */
+    view: reviewing ? ('review' as const) : state.phase,
+    review: {
+      reason: review.reason,
+      /** Others are still racing (standings not in yet). */
+      verifying: state.phase === 'waiting',
+      continue: () => sendReview({ type: 'continue' }),
+    },
     plugin: state.match ? plugins.get(state.match.gameId) : undefined,
     // A little tolerance: clock-sync jitter would otherwise show "4" at the start of a 3-second countdown.
     secondsToStart: state.startsAtLocal ? Math.max(0, Math.ceil((state.startsAtLocal - Date.now() - 250) / 1000)) : null,
     ready: () => controller.ready(),
-    forfeit: () => controller.forfeit(),
+    forfeit: () => {
+      forfeited.current = true;
+      controller.forfeit();
+    },
     retry: () => controller.retry(),
   };
 }

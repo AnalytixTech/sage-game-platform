@@ -138,7 +138,7 @@ Add styles to named parts without replacing them. Values are React Native styles
 />
 ```
 
-Parts: `button`, `card`, `chip`, `header`, `intro`, `resultHero`, `leaderboardRow`, `lobbyRow`, `countdown`, `gameBoard`.
+Parts: `button`, `card`, `chip`, `header`, `intro`, `resultHero`, `leaderboardRow`, `lobbyRow`, `countdown`, `gameBoard`, `review`, `wordDefinition`.
 
 ## 7. Replace a part (`components`)
 
@@ -161,6 +161,7 @@ function BrandButton({ label, onPress, variant, disabled, loading }: ButtonSlotP
 | `ResultHero` | `gameId`, `title`, `score`, `rank`, `durationMs`, `valid` |
 | `LeaderboardRow` | `rank`, `name`, `score`, `isYou`, `index` |
 | `Countdown` | `value` (seconds, or `null` for "Go!"), `kind` (`getReady` / `battle`) |
+| `WordDefinition` | `word`, `definition`, `note?`, `color` (the word's found colour), `onDismiss`. Rendered only while a definition is open; your component presents itself (a modal, a bottom sheet…). |
 
 ## 8. Wrap or replace whole screens
 
@@ -176,13 +177,14 @@ function BrandButton({ label, onPress, variant, disabled, loading }: ButtonSlotP
     </>
   )}
   renderResult={({ result, playAgain }, defaultResult) => (result.valid ? defaultResult : <MyNotRankedScreen onRetry={playAgain} />)}
+  renderReview={({ score, continue: next }, review) => review}
   renderSubmitting={({ attempt }, spinner) => spinner}
   renderError={({ message, retry }) => <MyError message={message} onRetry={retry} />}
   renderHeader={({ title, score, elapsedMs }) => <MyHeader title={title} score={score} />}
 />
 ```
 
-`hideChrome` hides the top bar entirely, and `showCountdown={false}` skips the 3-2-1 before timed games.
+`hideChrome` hides the top bar entirely, `showCountdown={false}` skips the 3-2-1 before timed games, and `reviewBeforeResult={false}` goes straight from the game to the result (no review of the finished board). `MatchLauncher` takes `reviewBeforeResult` and `renderReview` too.
 
 ## 9. Your own game view
 

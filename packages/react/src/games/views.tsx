@@ -1,4 +1,4 @@
-import React, { PointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { CSSProperties, PointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MemoryMatchState } from '@sagegames/game-memory-match';
 import type { QuizState } from '@sagegames/game-quiz-master';
 import type { SudokuState } from '@sagegames/game-sudoku';
@@ -18,9 +18,13 @@ import {
   useGameEvents,
   useMemoryBoard,
   useQuiz,
+  useSage,
+  useSlot,
+  useSlotStyle,
   useSudoku,
   useWordRush,
   useWordSearch,
+  WordDefinitionSlotProps,
   wordRushEvents,
   wordSearchEvents,
 } from '@sagegames/react-headless';
@@ -455,13 +459,87 @@ export function SudokuView({ state, dispatch, theme, labels, paused, ended }: Ga
 
 // ---------------------------------------------------------------- Word search
 
+/** The default definition popup: a modal dialog (focus trapped, Escape or backdrop to close). */
+export function WordDefinitionPopup({ word, definition, note, color, onDismiss }: WordDefinitionSlotProps) {
+  const { theme, labels } = useSage();
+  const slotStyle = useSlotStyle<CSSProperties>('wordDefinition');
+  const dialog = useRef<HTMLDivElement>(null);
+  const c = theme.colors;
+
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    dialog.current?.querySelector<HTMLElement>('button')?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onDismiss();
+      } else if (e.key === 'Tab' && dialog.current) {
+        // Keep focus inside the dialog.
+        const focusable = [...dialog.current.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])')];
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      previous?.focus?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: theme.spacing.lg }}>
+      <div aria-hidden onClick={onDismiss} style={{ position: 'absolute', inset: 0, background: c.overlay, animation: 'sg-fade 160ms ease-out' }} />
+      <div
+        ref={dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sg-word-definition-title"
+        aria-describedby="sg-word-definition-body"
+        data-testid="word-definition"
+        style={{
+          position: 'relative',
+          width: '100%',
+          maxWidth: 380,
+          animation: 'sg-fade-up 200ms ease-out',
+        }}
+      >
+        <Surface tone="raised" elevation="lg" style={stack(theme.spacing.md, { borderTop: `4px solid ${color}`, ...slotStyle })}>
+          <div style={row(10, { alignItems: 'center' })}>
+            <span aria-hidden style={{ width: 12, height: 12, borderRadius: 6, background: color, flex: 'none' }} />
+            <h2 id="sg-word-definition-title" style={{ margin: 0, color: c.text, ...typeStyle(theme, theme.typography.title) }}>
+              {word}
+            </h2>
+          </div>
+          <p id="sg-word-definition-body" style={{ margin: 0, color: c.text, ...typeStyle(theme, theme.typography.body) }}>
+            {definition}
+          </p>
+          {note ? <p style={{ margin: 0, color: c.textMuted, ...typeStyle(theme, theme.typography.caption), letterSpacing: 0 }}>{note}</p> : null}
+          <Button label={labels.gotIt} onClick={onDismiss} testId="word-definition-dismiss" />
+        </Surface>
+      </div>
+    </div>
+  );
+}
+
 export function WordSearchView({ state, dispatch, theme, labels, paused, ended }: GameViewProps<WordSearchState>) {
-  const ws = useWordSearch(state, dispatch);
+  const ws = useWordSearch(state, dispatch, { readOnly: ended });
+  const CustomDefinition = useSlot('WordDefinition');
   const { events, seq } = useGameEvents(state, wordSearchEvents);
   const c = theme.colors;
   const n = state.size;
   const palette = c.foundPalette.length ? c.foundPalette : ['#fde68a'];
-  const disabled = paused || ended;
+  // Once the game is over the grid still takes taps, for definitions only (readOnly above).
+  const disabled = paused;
   const found = findEvent(events, 'wordFound');
   const preview = [...ws.preview];
   const toCell = (e: PointerEvent<HTMLDivElement>): GridCell | null => {
@@ -539,14 +617,24 @@ export function WordSearchView({ state, dispatch, theme, labels, paused, ended }
         </div>
       </Shake>
       <Body muted center style={{ fontSize: 13 }}>
-        Drag across a word, or click its first and last letters.
+        {ended ? '' : 'Drag across a word, or click its first and last letters.'}
+        {ws.hasDefinitions && !paused ? `${ended ? '' : ' '}${labels.definitionHint}.` : ''}
       </Body>
       <div style={row(8, { flexWrap: 'wrap', justifyContent: 'center', maxWidth: 480 })}>
         {state.words.map((w, i) => (
           <Pop key={w.token} trigger={found?.word === i ? seq : null} inline>
-            <span
+            <button
+              type="button"
+              disabled={!ws.canDefine(i) || paused}
+              onClick={() => ws.showDefinition(i)}
+              aria-description={ws.canDefine(i) ? labels.definitionA11yHint : undefined}
+              title={ws.canDefine(i) ? labels.definitionA11yHint : undefined}
+              data-testid={`word-chip-${i}`}
+              className={ws.canDefine(i) ? 'sg-press' : undefined}
               style={{
                 display: 'inline-block',
+                cursor: ws.canDefine(i) ? 'pointer' : 'default',
+                font: 'inherit',
                 padding: '6px 12px',
                 borderRadius: theme.radii.pill,
                 background: w.found ? palette[i % palette.length] : c.surfaceAlt,
@@ -558,10 +646,21 @@ export function WordSearchView({ state, dispatch, theme, labels, paused, ended }
               }}
             >
               {w.display}
-            </span>
+            </button>
           </Pop>
         ))}
       </div>
+      {ws.definition &&
+        (() => {
+          const info: WordDefinitionSlotProps = {
+            word: ws.definition.word,
+            definition: ws.definition.definition,
+            ...(ws.definition.note ? { note: ws.definition.note } : {}),
+            color: palette[ws.definition.index % palette.length],
+            onDismiss: ws.closeDefinition,
+          };
+          return CustomDefinition ? <CustomDefinition {...info} /> : <WordDefinitionPopup {...info} />;
+        })()}
       {state.skippedWords.length > 0 && (
         <Body muted center style={{ fontSize: 12 }}>
           {labels.skippedWords}: {state.skippedWords.join(', ')}

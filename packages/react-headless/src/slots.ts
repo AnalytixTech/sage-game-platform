@@ -59,12 +59,24 @@ export interface CountdownSlotProps {
   kind: 'getReady' | 'battle';
 }
 
+export interface WordDefinitionSlotProps {
+  /** The word as displayed. */
+  word: string;
+  definition: string;
+  note?: string;
+  /** The word's found colour, for an accent. */
+  color: string;
+  onDismiss: () => void;
+}
+
 export interface SlotComponents {
   Button: ComponentType<ButtonSlotProps>;
   IntroCard: ComponentType<IntroCardSlotProps>;
   ResultHero: ComponentType<ResultHeroSlotProps>;
   LeaderboardRow: ComponentType<LeaderboardRowSlotProps>;
   Countdown: ComponentType<CountdownSlotProps>;
+  /** The popup that shows a found Word Search word's definition. */
+  WordDefinition: ComponentType<WordDefinitionSlotProps>;
 }
 
 /**
@@ -81,7 +93,9 @@ export type SlotStyleName =
   | 'leaderboardRow'
   | 'lobbyRow'
   | 'countdown'
-  | 'gameBoard';
+  | 'gameBoard'
+  | 'review'
+  | 'wordDefinition';
 
 export type SlotStyles = Partial<Record<SlotStyleName, unknown>>;
 

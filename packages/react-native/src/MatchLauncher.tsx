@@ -2,7 +2,7 @@ import React, { ReactNode, useEffect } from 'react';
 import { ScrollView, StyleProp, Text, View, ViewStyle } from 'react-native';
 import { MatchPlayerView, MatchStanding } from '@sagegames/types';
 import { MatchSeat, PlayableRuntime } from '@sagegames/core';
-import { alpha, formatDuration, gameAccent, gameGlyph, GamePlugin, mix, useFeedback, useMatch, useRuntimeSnapshot, useSage, useSlot, useSlotStyle } from '@sagegames/react-headless';
+import { alpha, formatDuration, gameAccent, gameGlyph, GamePlugin, mix, reviewStat, useFeedback, useMatch, useRuntimeSnapshot, useSage, useSlot, useSlotStyle } from '@sagegames/react-headless';
 import {
   Avatar,
   Body,
@@ -23,6 +23,7 @@ import {
   Surface,
   typeStyle,
 } from './ui/primitives';
+import { RenderReview, ReviewView } from './ui/ReviewView';
 
 export interface MatchLauncherProps {
   /** Your seat in the match (from your backend)… */
@@ -31,6 +32,10 @@ export interface MatchLauncherProps {
   getSeat?: () => Promise<MatchSeat>;
   onFinished?: (standings: MatchStanding[]) => void;
   onClose?: () => void;
+  /** Keep your finished board on screen with a Continue button before waiting/standings (default true). */
+  reviewBeforeResult?: boolean;
+  /** Replace or wrap the review of your finished board. */
+  renderReview?: RenderReview;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -40,13 +45,16 @@ export interface MatchLauncherProps {
  */
 export function MatchLauncher(props: MatchLauncherProps) {
   const { theme, labels } = useSage();
-  const m = useMatch({ seat: props.seat, getSeat: props.getSeat, onFinished: props.onFinished });
+  const m = useMatch({ seat: props.seat, getSeat: props.getSeat, onFinished: props.onFinished, reviewBeforeResult: props.reviewBeforeResult });
   const { state, plugin, me } = m;
   const c = theme.colors;
   const accent = plugin ? gameAccent(theme, plugin.rules.gameId) : c.primary;
 
   let body: ReactNode = null;
-  switch (state.phase) {
+  switch (m.view) {
+    case 'review':
+      body = state.runtime && plugin ? <MatchReview runtime={state.runtime} plugin={plugin} match={m} render={props.renderReview} /> : null;
+      break;
     case 'connecting':
       body = <Loading label={labels.connecting} />;
       break;
@@ -139,7 +147,7 @@ export function MatchLauncher(props: MatchLauncherProps) {
     <ScrollView
       style={[{ flex: 1, backgroundColor: c.background }, props.style]}
       contentContainerStyle={{ padding: theme.spacing.lg, paddingBottom: theme.spacing.xl * 2, gap: theme.spacing.md }}
-      scrollEnabled={state.phase !== 'playing'}
+      scrollEnabled={m.view !== 'playing'}
     >
       {state.reconnecting && (
         <FadeSlide from="top">
@@ -149,7 +157,7 @@ export function MatchLauncher(props: MatchLauncherProps) {
           </View>
         </FadeSlide>
       )}
-      <FadeSlide trigger={state.phase === 'waiting' ? 'playing' : state.phase} from="none">
+      <FadeSlide trigger={m.view === 'waiting' ? 'playing' : m.view} from={m.view === 'review' ? 'bottom' : 'none'}>
         {body}
       </FadeSlide>
     </ScrollView>
@@ -267,6 +275,38 @@ function RaceView({
       ended={snap.ended}
       theme={theme}
       labels={labels}
+    />
+  );
+}
+
+/** Your finished board (read-only) with your score and Continue, while the others finish. */
+function MatchReview({
+  runtime,
+  plugin,
+  match,
+  render,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  runtime: PlayableRuntime<any>;
+  plugin: GamePlugin;
+  match: ReturnType<typeof useMatch>;
+  render?: RenderReview;
+}) {
+  const { theme, labels } = useSage();
+  const snap = useRuntimeSnapshot(runtime);
+  const GameView = plugin.View;
+  const board = <GameView state={snap.state} dispatch={() => undefined} elapsedMs={snap.elapsedMs} paused={false} ended theme={theme} labels={labels} />;
+  return (
+    <ReviewView
+      board={board}
+      score={snap.score}
+      elapsedMs={snap.elapsedMs}
+      reason={match.review.reason ?? 'completed'}
+      stat={reviewStat(plugin.rules.gameId, snap.state, labels)}
+      status={match.review.verifying ? labels.waitingForPlayers : null}
+      verifying={match.review.verifying}
+      onContinue={match.review.continue}
+      render={render}
     />
   );
 }

@@ -9,11 +9,14 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const mdIn = (dir) => (fs.existsSync(path.join(ROOT, dir)) ? fs.readdirSync(path.join(ROOT, dir)).filter((f) => f.endsWith('.md')).map((f) => `${dir}/${f}`) : []);
 const files = [
-  ...fs.readdirSync(path.join(ROOT, 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`),
-  ...fs.readdirSync(path.join(ROOT, 'docs/guides')).filter((f) => f.endsWith('.md')).map((f) => `docs/guides/${f}`),
+  ...mdIn('docs'),
+  ...mdIn('docs/guides'),
   'README.md',
   'CHANGELOG.md',
+  'packages/react-native/README.md',
+  'packages/react/README.md',
 ].filter((f) => fs.existsSync(path.join(ROOT, f)));
 
 /** GitHub-style heading anchors (the portal uses the same rule). */
