@@ -46,6 +46,8 @@ scratch/
 **/src/**/*.js.map
 **/src/**/*.d.ts
 **/src/**/*.d.ts.map
+# …except the portal's hand-written declarations (the portal is built by Vite, never emits .d.ts).
+!services/portal/src/**/*.d.ts
 examples/**/*.js
 examples/**/*.js.map
 examples/**/*.d.ts
