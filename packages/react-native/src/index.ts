@@ -11,3 +11,6 @@ export * from './GamePreview';
 export * from './GameCatalog';
 export { LeaderboardList, ResultView } from './ui/ResultView';
 export * from './games';
+
+// Building blocks for custom game views and slots: <ui.Button/>, <ui.Surface/>, ui.useMotion()…
+export * as ui from './ui/primitives';

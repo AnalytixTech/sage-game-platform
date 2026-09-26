@@ -22,6 +22,11 @@ export const defaultLabels = {
   rejected: "We couldn't verify this game, so it doesn't count.",
   you: 'You',
   noScoresYet: 'No scores yet. Be the first!',
+  getReady: 'Get ready',
+  timed: 'Timed',
+  pauseAnytime: 'Pause anytime',
+  newBest: 'Top of the board!',
+  battleChip: 'Battle',
   // Quiz
   question: 'Question',
   correct: 'Correct!',

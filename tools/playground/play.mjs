@@ -32,11 +32,11 @@ const shot = (name) => page.screenshot({ path: `${out}/${name}.png`, fullPage: t
 const text = () => page.locator('body').innerText();
 
 /** Centre of cell (row, col) in an n x n grid element, in page coordinates. */
-async function cellCenter(testId, n, row, col, gap = 0) {
+async function cellCenter(testId, n, row, col, gap = 0, border = 1) {
   const box = await page.getByTestId(testId).boundingBox();
-  const inner = box.width - 2; // 1px border
+  const inner = box.width - 2 * border;
   const size = (inner - gap * (n - 1)) / n;
-  return { x: box.x + 1 + col * (size + gap) + size / 2, y: box.y + 1 + row * (size + gap) + size / 2 };
+  return { x: box.x + border + col * (size + gap) + size / 2, y: box.y + border + row * (size + gap) + size / 2 };
 }
 
 // ---- Memory, through the full launcher: intro → play → verified result + leaderboard
@@ -67,7 +67,7 @@ async function cellCenter(testId, n, row, col, gap = 0) {
     await page.waitForTimeout(250);
   }
   await page.getByText('Your score', { exact: false }).waitFor({ timeout: 5000 });
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(1300); // the score counts up and confetti settles
   await shot('memory_3_result');
   const t = await text();
   check(t.includes('800'), 'memory: server-verified score shown (6 pairs, one missed pair loses its bonus = 800)');
@@ -124,16 +124,16 @@ async function cellCenter(testId, n, row, col, gap = 0) {
   const rc = (i) => [Math.floor(i / n), i % n];
 
   const [w1, w2] = [state.words.find((w) => w.token === 'IMMIGRATION'), state.words.find((w) => w.token === 'VISA')];
-  const from = await cellCenter('word-search-grid', n, ...rc(w1.cells[0]));
-  const to = await cellCenter('word-search-grid', n, ...rc(w1.cells[w1.cells.length - 1]));
+  const from = await cellCenter('word-search-grid', n, ...rc(w1.cells[0]), 0, 0);
+  const to = await cellCenter('word-search-grid', n, ...rc(w1.cells[w1.cells.length - 1]), 0, 0);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
   await page.mouse.move(to.x, to.y, { steps: 5 });
   await page.mouse.up();
 
-  const a = await cellCenter('word-search-grid', n, ...rc(w2.cells[0]));
-  const b = await cellCenter('word-search-grid', n, ...rc(w2.cells[w2.cells.length - 1]));
+  const a = await cellCenter('word-search-grid', n, ...rc(w2.cells[0]), 0, 0);
+  const b = await cellCenter('word-search-grid', n, ...rc(w2.cells[w2.cells.length - 1]), 0, 0);
   await page.mouse.click(a.x, a.y);
   await page.mouse.click(b.x, b.y);
   await page.waitForTimeout(150);

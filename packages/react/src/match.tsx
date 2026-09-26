@@ -1,8 +1,31 @@
-import React, { CSSProperties, ReactNode } from 'react';
+import React, { CSSProperties, ReactNode, useEffect } from 'react';
 import { MatchPlayerView, MatchStanding } from '@sagegames/types';
 import { MatchSeat, PlayableRuntime } from '@sagegames/core';
-import { formatDuration, GamePlugin, useMatch, useRuntimeSnapshot, useSage } from '@sagegames/react-headless';
-import { Body, Button, Card, font, Heading, Loading, ProgressBar, row, SageStyles, stack } from './ui';
+import { alpha, formatDuration, gameAccent, gameGlyph, GamePlugin, mix, useFeedback, useMatch, useRuntimeSnapshot, useSage, useSlot, useSlotStyle } from '@sagegames/react-headless';
+import {
+  Avatar,
+  Body,
+  Button,
+  Card,
+  Chip,
+  Confetti,
+  CountUp,
+  FadeSlide,
+  font,
+  gradientCss,
+  Heading,
+  Icon,
+  Loading,
+  Pop,
+  ProgressBar,
+  Pulse,
+  row,
+  SageStyles,
+  shadowCss,
+  stack,
+  Surface,
+  typeStyle,
+} from './ui';
 
 export interface MatchLauncherProps {
   /** Your seat in the match (from your backend)… */
@@ -24,6 +47,7 @@ export function MatchLauncher(props: MatchLauncherProps) {
   const m = useMatch({ seat: props.seat, getSeat: props.getSeat, onFinished: props.onFinished });
   const { state, plugin, me } = m;
   const c = theme.colors;
+  const accent = plugin ? gameAccent(theme, plugin.rules.gameId) : c.primary;
 
   let body: ReactNode = null;
   switch (state.phase) {
@@ -32,41 +56,46 @@ export function MatchLauncher(props: MatchLauncherProps) {
       break;
     case 'lobby': {
       const players = state.match!.players.filter((p) => p.status !== 'absent');
+      const waiting = players.filter((p) => p.status !== 'ready').length;
       body = (
-        <Card style={stack(theme.spacing.md)}>
-          <Heading size={22}>
-            {plugin?.title} · {labels.battle}
-          </Heading>
-          <Body muted>{plugin?.instructions}</Body>
-          <div style={{ color: c.textMuted, fontSize: 13, ...font(theme, 'medium') }}>
-            {labels.waitingForPlayers} ·{' '}
-            {labels.playersJoinedOf.replace('{n}', String(players.length)).replace('{max}', String(state.match!.maxPlayers))}
+        <Surface padded={false} elevation="lg" style={{ overflow: 'hidden' }}>
+          <div style={row(12, { alignItems: 'center', padding: theme.spacing.lg, background: gradientCss([accent, mix(accent, c.surface, 0.55)]) })}>
+            <div style={{ width: 52, height: 52, borderRadius: 16, background: 'rgba(255,255,255,.18)', display: 'grid', placeItems: 'center', fontSize: 28, flex: 'none' }}>
+              {plugin ? gameGlyph(plugin.rules.gameId) : '🎮'}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: '#fff', ...typeStyle(theme, theme.typography.title), fontSize: 22 }}>
+                {plugin?.title} · {labels.battle}
+              </div>
+              <div style={{ color: 'rgba(255,255,255,.85)', ...typeStyle(theme, theme.typography.caption), letterSpacing: 0 }}>
+                {labels.playersJoinedOf.replace('{n}', String(players.length)).replace('{max}', String(state.match!.maxPlayers))}
+              </div>
+            </div>
           </div>
-          <div style={stack(6)}>
-            {players.map((p) => (
-              <LobbyRow key={p.playerId} player={p} isYou={p.playerId === state.you} />
-            ))}
+          <div style={stack(theme.spacing.md, { padding: theme.spacing.lg })}>
+            <Body muted>{plugin?.instructions}</Body>
+            <div style={stack(8)}>
+              {players.map((p, i) => (
+                <FadeSlide key={p.playerId} from="right" delay={i * 50}>
+                  <LobbyRow player={p} isYou={p.playerId === state.you} />
+                </FadeSlide>
+              ))}
+            </div>
+            <Pulse active={waiting > 0}>
+              <div style={{ color: c.textMuted, textAlign: 'center', ...typeStyle(theme, theme.typography.caption), letterSpacing: 0 }}>
+                {labels.waitingForPlayers}
+                {players.length < state.match!.minPlayers ? ` · ${labels.needMorePlayers.replace('{n}', String(state.match!.minPlayers))}` : ''}
+              </div>
+            </Pulse>
+            {me?.status === 'invited' ? <Button label={labels.readyUp} icon="check" onClick={m.ready} /> : <Body center>{labels.youAreReady}</Body>}
+            <Button variant="ghost" label={labels.leave} onClick={() => (m.forfeit(), props.onClose?.())} />
           </div>
-          {players.length < state.match!.minPlayers && (
-            <Body muted style={{ fontSize: 13 }}>
-              {labels.needMorePlayers.replace('{n}', String(state.match!.minPlayers))}
-            </Body>
-          )}
-          {me?.status === 'invited' ? <Button label={labels.readyUp} onClick={m.ready} /> : <Body center>{labels.youAreReady}</Body>}
-          <Button variant="ghost" label={labels.leave} onClick={() => (m.forfeit(), props.onClose?.())} />
-        </Card>
+        </Surface>
       );
       break;
     }
     case 'countdown':
-      body = (
-        <div role="timer" style={stack(theme.spacing.md, { alignItems: 'center', justifyContent: 'center', padding: '80px 0' })}>
-          <div style={{ color: c.textMuted, fontSize: 16, ...font(theme, 'medium') }}>{labels.startsIn}</div>
-          <div style={{ color: c.primary, fontSize: 96, lineHeight: 1, fontVariantNumeric: 'tabular-nums', ...font(theme, 'bold') }}>
-            {m.secondsToStart ? m.secondsToStart : labels.go}
-          </div>
-        </div>
-      );
+      body = <Countdown seconds={m.secondsToStart} />;
       break;
     case 'playing':
     case 'waiting':
@@ -74,7 +103,10 @@ export function MatchLauncher(props: MatchLauncherProps) {
         <div style={stack(theme.spacing.lg)}>
           <LiveStandings players={state.match!.players} you={state.you} />
           {state.phase === 'waiting' ? (
-            <Card>
+            <Card style={stack(theme.spacing.sm, { alignItems: 'center' })}>
+              <Pulse active>
+                <div style={{ fontSize: 36 }}>{me?.status === 'forfeited' ? '👋' : '🏁'}</div>
+              </Pulse>
               <Body center>{me?.status === 'forfeited' ? labels.youForfeited : labels.youFinished}</Body>
             </Card>
           ) : (
@@ -89,9 +121,10 @@ export function MatchLauncher(props: MatchLauncherProps) {
       break;
     case 'cancelled':
       body = (
-        <Card style={stack(theme.spacing.md)}>
+        <Card style={stack(theme.spacing.md, { alignItems: 'center' })}>
+          <div style={{ fontSize: 36 }}>⏳</div>
           <Body center>{labels.matchCancelled}</Body>
-          {props.onClose && <Button variant="ghost" label={labels.close} onClick={props.onClose} />}
+          {props.onClose && <Button variant="ghost" label={labels.close} onClick={props.onClose} style={{ alignSelf: 'stretch' }} />}
         </Card>
       );
       break;
@@ -107,34 +140,86 @@ export function MatchLauncher(props: MatchLauncherProps) {
   }
 
   return (
-    <div
-      className={`sg-root ${props.className ?? ''}`}
-      style={{ background: c.background, color: c.text, padding: theme.spacing.lg, ...stack(theme.spacing.md), ...props.style }}
-    >
+    <div className={`sg-root ${props.className ?? ''}`} style={{ background: c.background, color: c.text, padding: theme.spacing.lg, ...stack(theme.spacing.md), ...props.style }}>
       <SageStyles />
       {state.reconnecting && (
-        <div role="status" style={{ background: c.warning, color: '#1f2937', borderRadius: theme.radii.sm, padding: 8, textAlign: 'center', fontSize: 13, ...font(theme, 'medium') }}>
-          {labels.reconnecting}
-        </div>
+        <FadeSlide from="top" style={{ alignSelf: 'center' }}>
+          <div role="status" style={row(8, { alignItems: 'center', background: c.warning, color: '#1f2937', borderRadius: theme.radii.pill, padding: '6px 14px', ...typeStyle(theme, theme.typography.caption), letterSpacing: 0 })}>
+            <Icon name="bolt" size={13} color="#1f2937" />
+            {labels.reconnecting}
+          </div>
+        </FadeSlide>
       )}
-      {body}
+      <FadeSlide trigger={state.phase === 'waiting' ? 'playing' : state.phase} from="none">
+        {body}
+      </FadeSlide>
+    </div>
+  );
+}
+
+function Countdown({ seconds }: { seconds: number | null }) {
+  const { theme, labels } = useSage();
+  const Custom = useSlot('Countdown');
+  const slotStyle = useSlotStyle<CSSProperties>('countdown');
+  const feedback = useFeedback();
+  useEffect(() => {
+    if (seconds !== null) feedback('tap');
+  }, [seconds, feedback]);
+  if (Custom) return <Custom value={seconds || null} kind="battle" />;
+  return (
+    <div role="timer" style={stack(theme.spacing.md, { alignItems: 'center', justifyContent: 'center', padding: '80px 0', ...slotStyle })}>
+      <div style={{ color: theme.colors.textMuted, ...typeStyle(theme, theme.typography.heading) }}>{labels.startsIn}</div>
+      <Pop trigger={seconds}>
+        <div
+          style={{
+            width: 150,
+            height: 150,
+            borderRadius: 75,
+            display: 'grid',
+            placeItems: 'center',
+            background: gradientCss(theme.gradients.primary),
+            boxShadow: shadowCss(theme, 'lg'),
+            color: theme.colors.onPrimary,
+            ...typeStyle(theme, theme.typography.display),
+            fontSize: seconds ? 84 : 44,
+          }}
+        >
+          {seconds ? seconds : labels.go}
+        </div>
+      </Pop>
     </div>
   );
 }
 
 function LobbyRow({ player, isYou }: { player: MatchPlayerView; isYou: boolean }) {
   const { theme, labels } = useSage();
+  const slotStyle = useSlotStyle<CSSProperties>('lobbyRow');
   const c = theme.colors;
   const ready = player.status === 'ready';
+  const name = player.displayName ?? player.externalUserId;
   const status = !player.connected ? labels.statusOffline : ready ? labels.statusReady : labels.statusInvited;
   return (
-    <div style={row(10, { alignItems: 'center', padding: '10px 12px', borderRadius: theme.radii.md, background: isYou ? c.cellPeer : c.surfaceAlt })}>
-      <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: player.connected ? c.success : c.border, flex: 'none' }} />
+    <div
+      style={row(10, {
+        alignItems: 'center',
+        padding: '10px 12px',
+        borderRadius: theme.radii.md,
+        background: isYou ? alpha(c.primary, 0.14) : c.surfaceAlt,
+        border: `1px solid ${isYou ? alpha(c.primary, 0.4) : c.border}`,
+        ...slotStyle,
+      })}
+    >
+      <span style={{ position: 'relative', display: 'inline-flex' }}>
+        <Avatar name={name} size={36} />
+        <span aria-hidden style={{ position: 'absolute', right: -1, bottom: -1, width: 12, height: 12, borderRadius: 6, border: `2px solid ${c.surfaceAlt}`, background: player.connected ? c.success : c.border }} />
+      </span>
       <span style={{ flex: 1, color: c.text, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...font(theme, isYou ? 'bold' : 'regular') }}>
-        {player.displayName ?? player.externalUserId}
+        {name}
         {isYou ? ` (${labels.you})` : ''}
       </span>
-      <span style={{ color: ready ? c.success : c.textMuted, fontSize: 13, ...font(theme, 'medium') }}>{status}</span>
+      <Pop trigger={ready || null} inline>
+        <Chip label={status} tone={ready ? 'success' : 'neutral'} icon={ready ? <Icon name="check" size={11} color={c.success} /> : undefined} />
+      </Pop>
     </div>
   );
 }
@@ -144,20 +229,25 @@ function LiveStandings({ players, you }: { players: MatchPlayerView[]; you: stri
   const c = theme.colors;
   const racing = players.filter((p) => p.status !== 'absent').sort((a, b) => b.progress - a.progress || b.score - a.score);
   return (
-    <Card style={stack(8, { padding: theme.spacing.md })}>
-      {racing.map((p) => {
+    <Card style={stack(10, { padding: theme.spacing.md })}>
+      {racing.map((p, i) => {
         const isYou = p.playerId === you;
+        const name = p.displayName ?? p.externalUserId;
         return (
-          <div key={p.playerId} style={stack(4)}>
-            <div style={row(8, { justifyContent: 'space-between', fontSize: 13 })}>
-              <span style={{ color: c.text, ...font(theme, isYou ? 'bold' : 'medium') }}>
-                {p.displayName ?? p.externalUserId}
-                {isYou ? ` (${labels.you})` : ''}
-                {p.status === 'forfeited' ? ` · ${labels.forfeited}` : ''}
-              </span>
-              <span style={{ color: c.textMuted, fontVariantNumeric: 'tabular-nums', ...font(theme, 'bold') }}>{p.score}</span>
+          <div key={p.playerId} style={row(10, { alignItems: 'center' })}>
+            <span style={{ width: 16, color: i === 0 ? c.warning : c.textMuted, ...typeStyle(theme, theme.typography.caption), letterSpacing: 0 }}>{i + 1}</span>
+            <Avatar name={name} size={28} />
+            <div style={stack(4, { flex: 1, minWidth: 0 })}>
+              <div style={row(8, { justifyContent: 'space-between', fontSize: 13 })}>
+                <span style={{ color: c.text, ...font(theme, isYou ? 'bold' : 'medium') }}>
+                  {name}
+                  {isYou ? ` (${labels.you})` : ''}
+                  {p.status === 'forfeited' ? ` · ${labels.forfeited}` : ''}
+                </span>
+                <CountUp value={p.score} duration={300} style={{ color: c.text, ...font(theme, 'bold') }} />
+              </div>
+              <ProgressBar fraction={p.progress} color={isYou ? undefined : c.textMuted} height={6} />
             </div>
-            <ProgressBar fraction={p.progress} color={isYou ? c.primary : c.textMuted} />
           </div>
         );
       })}
@@ -191,37 +281,60 @@ function RaceView({
 
 function FinalStandings({ standings, you, onClose }: { standings: MatchStanding[]; you: string | null; onClose?: () => void }) {
   const { theme, labels } = useSage();
+  const feedback = useFeedback();
   const c = theme.colors;
   const mine = standings.find((s) => s.playerId === you);
-  const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`);
+  const won = mine?.rank === 1;
+  useEffect(() => {
+    feedback(won ? 'celebrate' : 'success');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const podium = [standings[1], standings[0], standings[2]].filter(Boolean) as MatchStanding[];
+  const heights: Record<number, number> = { 1: 96, 2: 70, 3: 52 };
+  const medal = (rank: number) => (rank === 1 ? 'medal1' : rank === 2 ? 'medal2' : 'medal3') as 'medal1' | 'medal2' | 'medal3';
   return (
     <div style={stack(theme.spacing.lg)}>
-      <Card style={stack(theme.spacing.sm, { alignItems: 'center', textAlign: 'center' })}>
-        <div style={{ fontSize: 48 }}>{mine?.rank === 1 ? '🏆' : medal(mine?.rank ?? 0)}</div>
-        <Heading size={24}>{mine?.rank === 1 ? labels.youWon : `${labels.youPlaced} #${mine?.rank ?? '–'}`}</Heading>
-      </Card>
+      <Surface gradient="hero" elevation="lg" style={stack(theme.spacing.md, { position: 'relative', alignItems: 'center', textAlign: 'center', overflow: 'hidden' })}>
+        <Confetti fire={won ? 1 : null} />
+        <div style={{ color: c.onPrimary, ...typeStyle(theme, theme.typography.title), fontSize: 26 }}>{won ? labels.youWon : `${labels.youPlaced} #${mine?.rank ?? '–'}`}</div>
+        <div style={row(10, { alignItems: 'flex-end', justifyContent: 'center' })}>
+          {podium.map((s, i) => (
+            <FadeSlide key={s.playerId} delay={200 + i * 120}>
+              <div style={stack(6, { alignItems: 'center', width: 86 })}>
+                <Avatar name={s.displayName ?? s.externalUserId} size={s.rank === 1 ? 48 : 38} />
+                <span style={{ color: c.onPrimary, maxWidth: 86, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...typeStyle(theme, theme.typography.caption), letterSpacing: 0 }}>
+                  {s.displayName ?? s.externalUserId}
+                </span>
+                <div style={{ width: '100%', height: heights[s.rank] ?? 40, borderRadius: '12px 12px 0 0', background: 'rgba(255,255,255,.2)', display: 'flex', justifyContent: 'center', paddingTop: 6 }}>
+                  <Icon name={medal(s.rank)} size={24} />
+                </div>
+              </div>
+            </FadeSlide>
+          ))}
+        </div>
+      </Surface>
       <Card style={stack(4)}>
         <Heading size={17}>{labels.standings}</Heading>
         <ol style={{ listStyle: 'none', margin: 0, padding: 0, ...stack(2) }}>
-          {standings.map((s) => {
+          {standings.map((s, k) => {
             const isYou = s.playerId === you;
             return (
-              <li key={s.playerId} style={row(10, { alignItems: 'center', padding: '10px', borderRadius: theme.radii.sm, background: isYou ? c.cellSelected : 'transparent' })}>
-                <span style={{ width: 32, fontSize: 18, textAlign: 'center' }}>{medal(s.rank)}</span>
-                <span style={{ flex: 1, ...stack(2) }}>
-                  <span style={{ color: c.text, fontSize: 15, ...font(theme, isYou ? 'bold' : 'medium') }}>
-                    {s.displayName ?? s.externalUserId}
-                    {isYou ? ` (${labels.you})` : ''}
-                  </span>
-                  <span style={{ color: c.textMuted, fontSize: 12 }}>
-                    {s.status === 'forfeited'
-                      ? labels.forfeited
-                      : s.completed && s.finishedMs !== null
-                        ? formatDuration(s.finishedMs)
-                        : `${Math.round(s.progress * 100)}%`}
-                  </span>
-                </span>
-                <span style={{ color: c.text, fontSize: 16, fontVariantNumeric: 'tabular-nums', ...font(theme, 'bold') }}>{s.score}</span>
+              <li key={s.playerId}>
+                <FadeSlide from="right" delay={k * 50}>
+                  <div style={row(10, { alignItems: 'center', padding: '10px', borderRadius: theme.radii.md, background: isYou ? alpha(c.primary, 0.2) : 'transparent' })}>
+                    <span style={{ width: 28, display: 'grid', placeItems: 'center', color: c.textMuted, ...font(theme, 'bold') }}>{s.rank <= 3 ? <Icon name={medal(s.rank)} size={20} /> : s.rank}</span>
+                    <span style={{ flex: 1, ...stack(2) }}>
+                      <span style={{ color: c.text, fontSize: 15, ...font(theme, isYou ? 'bold' : 'medium') }}>
+                        {s.displayName ?? s.externalUserId}
+                        {isYou ? ` (${labels.you})` : ''}
+                      </span>
+                      <span style={{ color: c.textMuted, fontSize: 12 }}>
+                        {s.status === 'forfeited' ? labels.forfeited : s.completed && s.finishedMs !== null ? formatDuration(s.finishedMs) : `${Math.round(s.progress * 100)}%`}
+                      </span>
+                    </span>
+                    <span style={{ color: c.text, fontVariantNumeric: 'tabular-nums', ...typeStyle(theme, theme.typography.heading) }}>{s.score}</span>
+                  </div>
+                </FadeSlide>
               </li>
             );
           })}

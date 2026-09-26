@@ -6,6 +6,7 @@ import { createAuth, SessionRow } from '../http/auth';
 import { AppContext, HostAuth } from '../http/context';
 import { asyncHandler, HttpError, parse } from '../http/errors';
 import { leaderboard, playerStats } from '../services/leaderboards';
+import { listResults } from '../services/results';
 import { deleteQuizBank, getQuizBank, listQuizBanks, quizBankBody, saveQuizBank } from '../services/quizBanks';
 import { catalogHandlers } from './catalogHandlers';
 import { COMPLETE_GRACE_MS, completeSession, createSession, loadCompletion, playPayload, startSession } from '../services/sessions';
@@ -108,44 +109,7 @@ export function v2Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
         }),
         req.query
       );
-      const rows = await ctx.db.query<Record<string, unknown>>(
-        `SELECT session_id, game_id, external_user_id, display_name, context_id, status, reject_code, score,
-                duration_ms, result, flags, is_valid, is_test, completed_at
-           FROM game_results
-          WHERE tenant_id = $1
-            AND ($2::text IS NULL OR external_user_id = $2)
-            AND ($3::text IS NULL OR game_id = $3)
-            AND ($4::text IS NULL OR context_id = $4)
-            AND ($5::timestamptz IS NULL OR completed_at >= $5)
-          ORDER BY completed_at DESC
-          LIMIT $6`,
-        [
-          (res.locals.host as HostAuth).tenantId,
-          query.externalUserId ?? null,
-          query.gameId ?? null,
-          query.contextId ?? null,
-          query.since ?? null,
-          query.limit,
-        ]
-      );
-      res.json(
-        rows.map((r) => ({
-          sessionId: r.session_id,
-          gameId: r.game_id,
-          externalUserId: r.external_user_id,
-          displayName: r.display_name,
-          contextId: r.context_id,
-          status: r.status,
-          rejectCode: r.reject_code,
-          valid: r.is_valid,
-          isTest: r.is_test,
-          score: r.score,
-          durationMs: r.duration_ms,
-          result: r.result,
-          flags: r.flags,
-          completedAt: new Date(r.completed_at as Date).toISOString(),
-        }))
-      );
+      res.json(await listResults(ctx.db, (res.locals.host as HostAuth).tenantId, query));
     })
   );
 

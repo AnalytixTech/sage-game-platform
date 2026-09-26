@@ -25,6 +25,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Docs (links, anchors, compiling samples)
+        run: npm run docs:check
+
   # Plays every game in a real browser (React Native views via react-native-web, and the web SDK)
   # with clicks, drags and taps, and checks the verified result screen.
   ui:
@@ -64,9 +67,19 @@ jobs:
       - name: Play a battle
         run: npm run test:battle
 
+      # The developer portal with a mocked API and session: pages must render without errors.
+      - name: Build and serve the portal
+        run: |
+          npm run build -w services/portal
+          (cd services/portal && npx vite preview --port 4174 --strictPort > ../../portal.log 2>&1 &)
+          npx wait-on http://localhost:4174/portal/ --timeout 60000
+
+      - name: Portal and docs pages
+        run: npm run test:portal
+
       - name: Server logs
         if: failure()
-        run: cat playground.log battle-server.log
+        run: cat playground.log battle-server.log portal.log
 
       - name: Upload screenshots
         if: always()

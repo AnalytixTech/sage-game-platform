@@ -1,6 +1,6 @@
 {
   "name": "@sagegames/game-sudoku",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Sudoku Game Module for SageGame Platform",
   "repository": {
     "type": "git",
@@ -13,8 +13,8 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@sagegames/engine": "2.1.0",
-    "@sagegames/types": "2.1.0"
+    "@sagegames/engine": "2.2.0",
+    "@sagegames/types": "2.2.0"
   },
   "files": [
     "dist"

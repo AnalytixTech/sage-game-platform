@@ -3,7 +3,9 @@
  *
  *   ?view=memory|quiz|sudoku|wordsearch|wordrush   a game on its own (local play)
  *   ?view=launcher&game=<gameId>                   the full launcher against a mock server
- *   &theme=dark|light
+ *   &preset=arcade|darkNavy|light|minimal       a preset (default arcade; &theme=light still works)
+ *   &brand=e11d48&mode=dark|light              createTheme from a brand colour instead
+ *   &motion=off                                 reduced motion
  */
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -12,10 +14,12 @@ import { replay } from '@sagegames/engine';
 import { CompletionResult, PlayInfo } from '@sagegames/types';
 import {
   allGames,
-  darkNavyTheme,
+  arcadeTheme,
+  createTheme,
+  PresetName,
+  presets,
   GameLauncher,
   GamePreview,
-  lightTheme,
   MatchLauncher,
   memoryMatch,
   quizMaster,
@@ -27,7 +31,12 @@ import {
 import * as Web from '@sagegames/react';
 
 const params = new URLSearchParams(window.location.search);
-const theme = params.get('theme') === 'light' ? lightTheme : darkNavyTheme;
+const brand = params.get('brand');
+const presetName = (params.get('preset') ?? (params.get('theme') === 'light' ? 'light' : 'arcade')) as PresetName;
+const theme = brand
+  ? createTheme({ brand: `#${brand.replace(/^#/, '')}`, mode: params.get('mode') === 'light' ? 'light' : 'dark' })
+  : presets[presetName] ?? arcadeTheme;
+const reduceMotion = params.get('motion') === 'off' ? true : undefined;
 const view = params.get('view') ?? 'memory';
 /** sdk=web renders @sagegames/react (DOM) instead of @sagegames/react-native. */
 const web = params.get('sdk') === 'web';
@@ -114,7 +123,7 @@ function WebApp() {
   if (view === 'launcher') {
     const gameId = params.get('game') ?? 'game_memory_001';
     return (
-      <Web.SageGameProvider games={Web.allGames} theme={theme} baseUrl="https://mock" fetch={mockFetch(gameId)}>
+      <Web.SageGameProvider games={Web.allGames} theme={theme} reduceMotion={reduceMotion} baseUrl="https://mock" fetch={mockFetch(gameId)}>
         <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: theme.colors.background }}>
           <Web.GameLauncher getSession={async () => ({ sessionId: 'sess_demo', sessionToken: 'stk_demo' })} onClose={() => undefined} />
         </div>
@@ -124,7 +133,7 @@ function WebApp() {
   const plugin = plugins[view as keyof typeof plugins] ?? Web.memoryMatch;
   const config = view === 'wordsearch' ? JAPABUDZ_WORDS : view === 'sudoku' ? { variant: params.get('variant') ?? '9x9' } : {};
   return (
-    <Web.SageGameProvider games={Web.allGames} theme={theme}>
+    <Web.SageGameProvider games={Web.allGames} theme={theme} reduceMotion={reduceMotion}>
       <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: theme.colors.background }}>
         <Web.GamePreview plugin={plugin} seed={params.get('seed') ?? 'playground'} config={config} />
       </div>
@@ -157,11 +166,11 @@ function BattleApp() {
       {battle.seats.map((seat, i) => (
         <div key={seat.playerToken} data-testid={`player-${i}`} style={{ flex: 1, minWidth: 0, height: '100vh', display: 'flex', flexDirection: 'column' }}>
           {web ? (
-            <Web.SageGameProvider games={Web.allGames} theme={theme} baseUrl={base}>
+            <Web.SageGameProvider games={Web.allGames} theme={theme} reduceMotion={reduceMotion} baseUrl={base}>
               <Web.MatchLauncher seat={seat} style={{ minHeight: '100vh' }} />
             </Web.SageGameProvider>
           ) : (
-            <SageGameProvider games={allGames} theme={theme} baseUrl={base}>
+            <SageGameProvider games={allGames} theme={theme} reduceMotion={reduceMotion} baseUrl={base}>
               <MatchLauncher seat={seat} />
             </SageGameProvider>
           )}
@@ -177,7 +186,7 @@ function App() {
   if (view === 'launcher') {
     const gameId = params.get('game') ?? 'game_memory_001';
     return (
-      <SageGameProvider games={allGames} theme={theme} baseUrl="https://mock" fetch={mockFetch(gameId)}>
+      <SageGameProvider games={allGames} theme={theme} reduceMotion={reduceMotion} baseUrl="https://mock" fetch={mockFetch(gameId)}>
         <View style={{ height: '100%' as unknown as number }}>
           <GameLauncher
             getSession={async () => ({ sessionId: 'sess_demo', sessionToken: 'stk_demo' })}
@@ -190,7 +199,7 @@ function App() {
   const plugin = previews[view as keyof typeof previews] ?? memoryMatch;
   const config = view === 'wordsearch' ? JAPABUDZ_WORDS : view === 'sudoku' ? { variant: params.get('variant') ?? '9x9' } : {};
   return (
-    <SageGameProvider games={allGames} theme={theme}>
+    <SageGameProvider games={allGames} theme={theme} reduceMotion={reduceMotion}>
       <View style={{ minHeight: '100%' as unknown as number, backgroundColor: theme.colors.background }}>
         <GamePreview plugin={plugin} seed={params.get('seed') ?? 'playground'} config={config} />
       </View>

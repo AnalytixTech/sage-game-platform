@@ -26,6 +26,7 @@ import {
   validateWebhookUrl,
 } from '../services/tenants';
 import { deleteQuizBank, getQuizBank, listQuizBanks, quizBankBody, saveQuizBank } from '../services/quizBanks';
+import { listResults } from '../services/results';
 
 const MAX_APPS_PER_USER = 10;
 
@@ -249,6 +250,17 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
       await member(req.params.appId, user(res).id);
       await deleteQuizBank(ctx.db, req.params.appId, req.params.bankId);
       res.status(204).end();
+    })
+  );
+
+  // ---- Recent results (overview) ----
+
+  router.get(
+    '/apps/:appId/results',
+    asyncHandler(async (req, res) => {
+      await member(req.params.appId, user(res).id);
+      const limit = parse(z.coerce.number().int().min(1).max(50).default(10), req.query.limit);
+      res.json(await listResults(ctx.db, req.params.appId, { limit }));
     })
   );
 

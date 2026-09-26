@@ -204,7 +204,8 @@ export function useMatch(options: UseMatchOptions) {
     state,
     me,
     plugin: state.match ? plugins.get(state.match.gameId) : undefined,
-    secondsToStart: state.startsAtLocal ? Math.max(0, Math.ceil((state.startsAtLocal - Date.now()) / 1000)) : null,
+    // A little tolerance: clock-sync jitter would otherwise show "4" at the start of a 3-second countdown.
+    secondsToStart: state.startsAtLocal ? Math.max(0, Math.ceil((state.startsAtLocal - Date.now() - 250) / 1000)) : null,
     ready: () => controller.ready(),
     forfeit: () => controller.forfeit(),
     retry: () => controller.retry(),

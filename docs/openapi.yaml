@@ -1,0 +1,368 @@
+openapi: 3.1.0
+info:
+  title: SageGames API
+  version: 2.2.0
+  description: |
+    Server API for SageGames. Your **backend** calls the host endpoints with an API key
+    (`Authorization: Bearer sk_live_…`). Your **app** only uses session endpoints, through the SDK,
+    with a short-lived session token (`Authorization: Bearer stk_…`).
+servers:
+  - url: https://sage-game-platform.onrender.com
+tags:
+  - name: Sessions
+    description: Start games and read results (API key).
+  - name: Player
+    description: Used by the SDK with a session token.
+  - name: Leaderboards
+  - name: Battles
+    description: Online matches (API key); players connect to the WebSocket at /v2/ws.
+  - name: Quiz banks
+  - name: Catalog
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: An API key from the developer portal (sk_live_… or sk_test_…). Server-side only.
+    sessionToken:
+      type: http
+      scheme: bearer
+      description: A session token returned by POST /v2/sessions (stk_…). Valid for one session, one hour.
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, description: A readable message. }
+        code: { type: string, description: 'A stable code, e.g. invalid_api_key, game_not_enabled, invalid_config.' }
+        details: { description: Validation details, when relevant. }
+    CreateSessionRequest:
+      type: object
+      required: [gameId, externalUserId]
+      properties:
+        gameId: { type: string, example: game_memory_001 }
+        externalUserId: { type: string, description: Your user id. }
+        displayName: { type: string, description: Shown on leaderboards. }
+        contextId: { type: string, description: 'Groups a leaderboard, e.g. "group:42" or "dm:7".' }
+        config: { type: object, description: Game options (see Games). }
+        metadata: { type: object, description: Stored with the session, returned only to your backend. }
+    CreatedSession:
+      type: object
+      properties:
+        sessionId: { type: string }
+        sessionToken: { type: string, description: Give this (and sessionId) to the app. Never the API key. }
+        gameId: { type: string }
+        expiresAt: { type: string, format: date-time }
+        rulesVersion: { type: integer }
+    CompletionResult:
+      type: object
+      properties:
+        sessionId: { type: string }
+        gameId: { type: string }
+        status: { type: string, enum: [verified, rejected] }
+        valid: { type: boolean, description: Counts on leaderboards. }
+        score: { type: integer }
+        durationMs: { type: integer }
+        rank: { type: [integer, 'null'] }
+        result: { type: object, description: Game-specific stats. }
+        flags: { type: array, items: { type: string } }
+        rejectCode: { type: [string, 'null'] }
+        completedAt: { type: string, format: date-time }
+    Result:
+      type: object
+      properties:
+        sessionId: { type: string }
+        gameId: { type: string }
+        externalUserId: { type: string }
+        displayName: { type: [string, 'null'] }
+        contextId: { type: [string, 'null'] }
+        status: { type: string }
+        rejectCode: { type: [string, 'null'] }
+        valid: { type: boolean }
+        isTest: { type: boolean }
+        score: { type: integer }
+        durationMs: { type: integer }
+        result: { type: object }
+        flags: { type: array, items: { type: string } }
+        completedAt: { type: string, format: date-time }
+    Leaderboard:
+      type: object
+      properties:
+        gameId: { type: string }
+        period: { type: string }
+        totalPlayers: { type: integer }
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              rank: { type: integer }
+              externalUserId: { type: string }
+              username: { type: [string, 'null'] }
+              score: { type: integer }
+              achievedAt: { type: string, format: date-time }
+    CreateMatchRequest:
+      type: object
+      required: [gameId]
+      properties:
+        gameId: { type: string }
+        players:
+          type: array
+          items: { type: object, properties: { externalUserId: { type: string }, displayName: { type: string } } }
+        allowJoin: { type: boolean, description: Let others take a seat while the lobby is open. }
+        minPlayers: { type: integer, minimum: 2, maximum: 16 }
+        maxPlayers: { type: integer, minimum: 2, maximum: 16 }
+        lobbyTimeoutSec: { type: integer, minimum: 15, maximum: 600 }
+        contextId: { type: string }
+        config: { type: object }
+    MatchView:
+      type: object
+      properties:
+        matchId: { type: string }
+        gameId: { type: string }
+        status: { type: string, enum: [lobby, countdown, in_progress, finished, cancelled, aborted] }
+        contextId: { type: [string, 'null'] }
+        minPlayers: { type: integer }
+        maxPlayers: { type: integer }
+        allowJoin: { type: boolean }
+        lobbyExpiresAt: { type: string, format: date-time }
+        startAt: { type: [integer, 'null'] }
+        players: { type: array, items: { type: object } }
+        standings: { type: [array, 'null'], items: { type: object } }
+    PlayerSeat:
+      type: object
+      properties:
+        matchId: { type: string }
+        playerId: { type: string }
+        playerToken: { type: string, description: Send to that player's app only. }
+    QuizBank:
+      type: object
+      properties:
+        bankId: { type: string }
+        name: { type: string }
+        questions:
+          type: array
+          items:
+            type: object
+            required: [question, answer, wrong]
+            properties:
+              question: { type: string }
+              answer: { type: string }
+              wrong: { type: array, items: { type: string }, minItems: 1, maxItems: 5 }
+              category: { type: string }
+              difficulty: { type: string, enum: [easy, medium, hard] }
+  responses:
+    Error:
+      description: Error
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+paths:
+  /v2/sessions:
+    post:
+      tags: [Sessions]
+      summary: Start a game session
+      description: Checks the game is enabled for your app, validates the config, and stores a seed. Return only sessionId and sessionToken to your app.
+      security: [{ apiKey: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateSessionRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CreatedSession' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v2/sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      summary: A session's status, metadata and result
+      security: [{ apiKey: [] }]
+      parameters: [{ name: sessionId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: The session }
+        '404': { $ref: '#/components/responses/Error' }
+  /v2/results:
+    get:
+      tags: [Sessions]
+      summary: Recent results, newest first
+      security: [{ apiKey: [] }]
+      parameters:
+        - { name: externalUserId, in: query, schema: { type: string } }
+        - { name: gameId, in: query, schema: { type: string } }
+        - { name: contextId, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        '200': { description: Results, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Result' } } } } }
+  /v2/leaderboards/{gameId}:
+    get:
+      tags: [Leaderboards]
+      summary: Best verified score per player
+      security: [{ apiKey: [] }]
+      parameters:
+        - { name: gameId, in: path, required: true, schema: { type: string } }
+        - { name: contextId, in: query, schema: { type: string } }
+        - { name: period, in: query, schema: { type: string, enum: [all_time, daily, weekly, monthly] } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200': { description: Leaderboard, content: { application/json: { schema: { $ref: '#/components/schemas/Leaderboard' } } } }
+  /v2/users/{externalUserId}/stats:
+    get:
+      tags: [Leaderboards]
+      summary: A player's totals and per-game stats
+      security: [{ apiKey: [] }]
+      parameters: [{ name: externalUserId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Stats }
+  /v2/sessions/{sessionId}/play:
+    get:
+      tags: [Player]
+      summary: Seed, config and rules version to build the game
+      security: [{ sessionToken: [] }]
+      parameters: [{ name: sessionId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Play info }
+  /v2/sessions/{sessionId}/start:
+    post:
+      tags: [Player]
+      summary: Mark the session started
+      description: Answers 426 sdk_update_required when the app's rules version is older than the server's.
+      security: [{ sessionToken: [] }]
+      parameters: [{ name: sessionId, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { rulesVersion: { type: integer } } } } } }
+      responses:
+        '200': { description: Started }
+        '426': { $ref: '#/components/responses/Error' }
+  /v2/sessions/{sessionId}/complete:
+    post:
+      tags: [Player]
+      summary: Submit the move log; the server replays it and returns the verified result
+      description: Idempotent for the same log. A different log for a completed session answers 409.
+      security: [{ sessionToken: [] }]
+      parameters: [{ name: sessionId, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [log], properties: { log: { type: object } } } } } }
+      responses:
+        '200': { description: Verified, content: { application/json: { schema: { $ref: '#/components/schemas/CompletionResult' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { description: Rejected (the log did not replay), content: { application/json: { schema: { $ref: '#/components/schemas/CompletionResult' } } } }
+  /v2/sessions/{sessionId}/leaderboard:
+    get:
+      tags: [Player]
+      summary: Leaderboard for the session's game and context
+      security: [{ sessionToken: [] }]
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string, enum: [context, game], default: context } }
+        - { name: period, in: query, schema: { type: string, enum: [all_time, daily, weekly, monthly] } }
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        '200': { description: Leaderboard, content: { application/json: { schema: { $ref: '#/components/schemas/Leaderboard' } } } }
+  /v2/matches:
+    post:
+      tags: [Battles]
+      summary: Create a battle
+      security: [{ apiKey: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateMatchRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/MatchView' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+  /v2/matches/{matchId}:
+    get:
+      tags: [Battles]
+      summary: A battle's status, players and standings
+      security: [{ apiKey: [] }]
+      parameters: [{ name: matchId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: The match, content: { application/json: { schema: { $ref: '#/components/schemas/MatchView' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v2/matches/{matchId}/tokens:
+    post:
+      tags: [Battles]
+      summary: A seat token for a seated player (replaces their previous token)
+      security: [{ apiKey: [] }]
+      parameters: [{ name: matchId, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [externalUserId], properties: { externalUserId: { type: string } } } } } }
+      responses:
+        '201': { description: Seat, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerSeat' } } } }
+  /v2/matches/{matchId}/players:
+    post:
+      tags: [Battles]
+      summary: Take a seat in an open lobby, then return its token
+      security: [{ apiKey: [] }]
+      parameters: [{ name: matchId, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [externalUserId], properties: { externalUserId: { type: string }, displayName: { type: string } } } } } }
+      responses:
+        '201': { description: Seat, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerSeat' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v2/quiz-banks:
+    get:
+      tags: [Quiz banks]
+      summary: List your quiz banks
+      security: [{ apiKey: [] }]
+      responses:
+        '200': { description: Banks }
+  /v2/quiz-banks/{bankId}:
+    get:
+      tags: [Quiz banks]
+      summary: A quiz bank with its questions
+      security: [{ apiKey: [] }]
+      parameters: [{ name: bankId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: The bank, content: { application/json: { schema: { $ref: '#/components/schemas/QuizBank' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      tags: [Quiz banks]
+      summary: Create or replace a quiz bank (up to 200 questions)
+      security: [{ apiKey: [] }]
+      parameters: [{ name: bankId, in: path, required: true, schema: { type: string, pattern: '^[a-zA-Z0-9_-]{1,64}$' } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [questions], properties: { name: { type: string }, questions: { type: array, items: { type: object } } } } } } }
+      responses:
+        '200': { description: Saved }
+        '400': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Quiz banks]
+      summary: Delete a quiz bank
+      security: [{ apiKey: [] }]
+      parameters: [{ name: bankId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Deleted }
+  /v2/games:
+    get:
+      tags: [Catalog]
+      summary: The game catalog (with an API key, only your app's games)
+      security: [{}, { apiKey: [] }]
+      responses:
+        '200': { description: Games }
+  /v2/games/{gameId}:
+    get:
+      tags: [Catalog]
+      summary: One game
+      parameters: [{ name: gameId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: The game }
+        '404': { $ref: '#/components/responses/Error' }
+x-websocket:
+  url: /v2/ws
+  description: |
+    Battle players connect here (the SDK's MatchLauncher does this for you). The first message must be
+    `{"type":"auth","token":"<playerToken>"}` within 5 seconds; the token never goes in the URL.
+  clientMessages:
+    auth: '{ type: "auth", token }'
+    ready: '{ type: "ready" }'
+    action: '{ type: "action", seq, t, a: [type, payload?] }'
+    forfeit: '{ type: "forfeit" }'
+    ping: '{ type: "ping", t }'
+  serverMessages:
+    welcome: '{ type: "welcome", you, match, play, actions, state?, serverNow }'
+    match: '{ type: "match", match, serverNow }'
+    countdown: '{ type: "countdown", startAt, serverNow }'
+    started: '{ type: "started", startAt, serverNow }'
+    ack: '{ type: "ack", seq, t }'
+    reject: '{ type: "reject", seq, code }'
+    state: '{ type: "state", state, t }  (hidden-information games: your view of the board)'
+    progress: '{ type: "progress", players }'
+    finished: '{ type: "finished", standings }'
+    pong: '{ type: "pong", t, serverNow }'
+    error: '{ type: "error", code, message }'
+x-webhooks:
+  signature: 'Sage-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">'
+  events:
+    session.completed: A game was verified or rejected (data is the result, plus matchId for battle seats).
+    match.finished: A battle ended (data has matchId, gameId, contextId, standings, finishedAt).

@@ -174,4 +174,4 @@ npm run dev -w services/portal                    # http://localhost:5173/portal
 
 ## Publishing the SDK packages
 
-Push a version tag (for example `git tag v2.1.0 && git push --tags`). The **Publish NPM Packages** workflow then builds, tests and publishes every public package whose version isn't on npm yet. The services and examples are private and never published.
+Push a version tag (for example `git tag v2.2.0 && git push --tags`). The **Publish NPM Packages** workflow then builds, tests and publishes every public package whose version isn't on npm yet. The services and examples are private and never published.
