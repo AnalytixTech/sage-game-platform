@@ -9,6 +9,7 @@ import {
   GamePlugin,
   mix,
   RenderOverride,
+  reviewStat,
   useFeedback,
   useSlot,
   useSlotStyle,
@@ -35,6 +36,7 @@ import {
   useMotion,
 } from './ui/primitives';
 import { ResultView } from './ui/ResultView';
+import { RenderReview, ReviewView } from './ui/ReviewView';
 
 export interface GameLauncherProps extends UseLauncherOptions {
   /** Called when the player taps Close (on the result or error screen). */
@@ -55,6 +57,11 @@ export interface GameLauncherProps extends UseLauncherOptions {
   renderSubmitting?: RenderOverride<{ attempt: number }>;
   /** Replace or wrap the error card. */
   renderError?: RenderOverride<{ message: string; retry?: () => void; close?: () => void }>;
+  /**
+   * Replace or wrap the review shown when a game ends (the finished board, a summary and
+   * Continue). Turn the review off with `reviewBeforeResult={false}`.
+   */
+  renderReview?: RenderReview;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -82,7 +89,7 @@ export function GameLauncher(props: GameLauncherProps) {
   const play = () => (timed && props.showCountdown !== false ? setCounting(true) : launcher.begin());
 
   let body: ReactNode;
-  switch (state.phase) {
+  switch (launcher.view) {
     case 'loading':
       body = <Loading label={labels.loading} />;
       break;
@@ -103,6 +110,12 @@ export function GameLauncher(props: GameLauncherProps) {
       break;
     case 'playing':
       body = state.runtime && plugin ? <PlayingView runtime={state.runtime} plugin={plugin} launcher={launcher} renderHeader={props.renderHeader} hideChrome={props.hideChrome} /> : null;
+      break;
+    case 'review':
+      body =
+        state.runtime && plugin ? (
+          <LauncherReview runtime={state.runtime} plugin={plugin} launcher={launcher} render={props.renderReview} />
+        ) : null;
       break;
     case 'submitting': {
       const waiting = <Loading label={state.attempt > 1 ? labels.retrying : labels.submitting} />;
@@ -150,9 +163,9 @@ export function GameLauncher(props: GameLauncherProps) {
       style={[{ flex: 1, backgroundColor: c.background }, props.style]}
       contentContainerStyle={{ padding: theme.spacing.lg, paddingBottom: theme.spacing.xl * 2, gap: theme.spacing.lg }}
       keyboardShouldPersistTaps="handled"
-      scrollEnabled={state.phase !== 'playing'}
+      scrollEnabled={launcher.view !== 'playing'}
     >
-      <FadeSlide trigger={`${state.phase}${counting}`} from={state.phase === 'result' ? 'bottom' : 'none'}>
+      <FadeSlide trigger={`${launcher.view}${counting}`} from={launcher.view === 'result' || launcher.view === 'review' ? 'bottom' : 'none'}>
         {body}
       </FadeSlide>
     </ScrollView>
@@ -215,6 +228,47 @@ function GetReady({ onDone }: { onDone: () => void }) {
         <Text style={[typeStyle(theme, theme.typography.display), { color: theme.colors.primary, fontSize: 96, lineHeight: 104 }]}>{n}</Text>
       </Pop>
     </View>
+  );
+}
+
+/** The finished board (read-only) with the score, a key stat and Continue. */
+function LauncherReview({
+  runtime,
+  plugin,
+  launcher,
+  render,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  runtime: PlayableRuntime<any>;
+  plugin: GamePlugin;
+  launcher: ReturnType<typeof useLauncher>;
+  render?: RenderReview;
+}) {
+  const { theme, labels } = useSage();
+  const boardStyle = useSlotStyle<StyleProp<ViewStyle>>('gameBoard');
+  const snap = useRuntimeSnapshot(runtime);
+  const { state, review } = launcher;
+  const View_ = plugin.View;
+  const board = (
+    <View style={boardStyle}>
+      <View_ state={snap.state} dispatch={() => undefined} elapsedMs={snap.elapsedMs} paused={false} ended theme={theme} labels={labels} />
+    </View>
+  );
+  const status =
+    state.phase === 'submitting' ? (state.attempt > 1 ? labels.retrying : labels.submitting) : state.phase === 'error' ? (state.error?.message ?? null) : null;
+  return (
+    <ReviewView
+      board={board}
+      score={state.result?.score ?? snap.score}
+      elapsedMs={snap.elapsedMs}
+      reason={review.reason ?? 'completed'}
+      stat={reviewStat(plugin.rules.gameId, snap.state, labels)}
+      status={status}
+      statusTone={state.phase === 'error' ? 'danger' : 'muted'}
+      verifying={review.verifying}
+      onContinue={review.continue}
+      render={render}
+    />
   );
 }
 

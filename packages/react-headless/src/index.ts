@@ -5,6 +5,7 @@ export * from './feedback';
 export * from './events';
 export * from './motion';
 export * from './slots';
+export * from './review';
 export * from './labels';
 export * from './plugin';
 export * from './provider';

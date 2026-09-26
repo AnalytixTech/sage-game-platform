@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SageGames API
-  version: 2.2.0
+  version: 2.3.0
   description: |
     Server API for SageGames. Your **backend** calls the host endpoints with an API key
     (`Authorization: Bearer sk_live_…`). Your **app** only uses session endpoints, through the SDK,

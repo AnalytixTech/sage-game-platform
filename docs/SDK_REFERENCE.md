@@ -17,17 +17,20 @@
 | `labels` | `Partial<SageLabels>` | Rewording and translations. |
 | `feedback` | `FeedbackAdapter` | Haptics and sounds, e.g. `expoHapticsFeedback(Haptics)`. |
 | `reduceMotion` | `boolean` | Force motion off (`true`) or on (`false`); default follows the OS. |
-| `components` | `Partial<SlotComponents>` | Replace `Button`, `IntroCard`, `ResultHero`, `LeaderboardRow`, `Countdown`. |
+| `components` | `Partial<SlotComponents>` | Replace `Button`, `IntroCard`, `ResultHero`, `LeaderboardRow`, `Countdown`, `WordDefinition`. |
 | `slotStyles` | `SlotStyles` | Extra styles for named parts. |
 | `pendingStore` | `PendingStore` | AsyncStorage / localStorage, keeps unsent results across restarts. |
 | `fetch` | `typeof fetch` | Custom fetch (tests, proxies). |
+| `onWordDefinition` | `(info: { gameId, word }) => void` | Called when a player opens a Word Search definition (analytics). |
 
 ## Components
 
 | Component | Props |
 | --- | --- |
-| `GameLauncher` | `getSession` or `session`, `onComplete`, `onError`, `onEvent`, `onClose`, `autoStart`, `showLeaderboard`, `showCountdown`, `hideChrome`, `renderHeader`, `renderIntro`, `renderResult`, `renderSubmitting`, `renderError`, `style` (and `className` on the web) |
-| `MatchLauncher` | `seat` or `getSeat`, `onFinished`, `onClose`, `style` |
+| `GameLauncher` | `getSession` or `session`, `onComplete`, `onError`, `onEvent`, `onClose`, `autoStart`, `showLeaderboard`, `showCountdown`, `hideChrome`, `reviewBeforeResult`, `renderHeader`, `renderIntro`, `renderReview`, `renderResult`, `renderSubmitting`, `renderError`, `style` (and `className` on the web) |
+| `MatchLauncher` | `seat` or `getSeat`, `onFinished`, `onClose`, `reviewBeforeResult`, `renderReview`, `style` |
+| `ReviewView` | The review screen on its own: `board`, `score`, `elapsedMs`, `reason`, `stat`, `status`, `verifying`, `onContinue`, `render` |
+| `WordDefinitionPopup` | The default Word Search definition popup (`WordDefinitionSlotProps`) |
 | `GameCatalog` | `onSelectGame`, `category` |
 | `GamePreview` | `plugin`, `seed`, `config`: plays locally, not verified (demos, tutorials) |
 | `LeaderboardList` | `session`, and `highlightUserRank` (React Native) or `highlightRank` (web) |
@@ -35,13 +38,35 @@
 
 `GameLauncher` calls `onComplete` once, with the server's result: `sessionId`, `gameId`, `status` (`verified`/`rejected`), `valid`, `score`, `durationMs`, `rank`, `result`, `flags`.
 
+### Review before the result (2.3)
+
+When a game ends (completed, time up or quit) the finished board stays on screen, read-only, with the score, the time, one key stat and a **Continue** button. Verification starts at once in the background, exactly as before, and its status shows next to the button ("Checking your score…", "Connection trouble, retrying…"). Continue shows the result, or "Checking your score…" first if verification is still running. In a battle, Continue leads to the waiting screen or the standings.
+
+`onComplete` is not delayed by the review: it fires as soon as the server answers. The review never changes the submitted moves or the end time.
+
+`reviewBeforeResult={false}` turns it off (2.2 behaviour). `renderReview` wraps or replaces it:
+
+```tsx
+<GameLauncher
+  getSession={getSession}
+  renderReview={({ score, verifying, continue: next }, review) => (
+    <>
+      <MyShareBar score={score} />
+      {review}
+    </>
+  )}
+/>
+```
+
+`renderReview` receives `{ board, score, elapsedMs, reason: 'completed' | 'quit' | 'timeout', verifying, continue }` and the default element.
+
 ## Hooks
 
 | Hook | Returns |
 | --- | --- |
 | `useSage()` | `{ theme, labels, plugins, client, feedback, … }` |
-| `useLauncher(options)` | The launcher's state machine, for a fully custom launcher UI |
-| `useMatch({ seat \| getSeat })` | `{ state, me, plugin, secondsToStart, ready, forfeit, retry }` |
+| `useLauncher(options)` | The launcher's state machine, for a fully custom launcher UI. Also returns `view` (the phase, or `'review'`) and `review { reason, verifying, continue }` |
+| `useMatch({ seat \| getSeat })` | `{ state, me, plugin, view, review, secondsToStart, ready, forfeit, retry }` |
 | `useLeaderboard(session, { scope, limit })` | `{ board, loading, error }` |
 | `useGames({ category })` | The catalog |
 | `useLocalGame(rules, seed, config)` | A local runtime and its snapshot |
@@ -53,6 +78,8 @@
 | Game controllers | `useQuiz`, `useMemoryBoard`, `useSudoku`, `useWordSearch`, `useWordRush` |
 
 Event detectors for `useGameEvents`: `quizEvents`, `memoryEvents`, `sudokuEvents`, `wordSearchEvents`, `wordRushEvents`.
+
+`useWordSearch(state, dispatch, { readOnly })` also returns `definition` (the open one, or `null`), `showDefinition(index)`, `closeDefinition()`, `canDefine(index)` and `hasDefinitions`. The pure pieces behind the review and the tap rule are exported too: `reviewReducer`, `launcherView`, `reviewStat`, `reviewTitle`, `selectionStep`, `definedWordAt`.
 
 ## Theme
 

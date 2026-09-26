@@ -86,12 +86,21 @@ for (const [a, b] of list.slice(3)) {
   await flip(0, b);
   await page.waitForTimeout(120);
 }
+// 2.3: the finished board first, then Continue → waiting.
+await col(0).getByTestId('sage-review-continue').waitFor({ timeout: 5000 });
+await page.waitForTimeout(300);
+await shot('5_review');
+check((await text(0)).includes('Finished!'), 'finisher reviews their board before waiting');
+await col(0).getByTestId('sage-review-continue').click();
 await col(0).getByText('You finished').waitFor({ timeout: 5000 });
 await page.waitForTimeout(300);
-await shot('5_waiting');
+await shot('5b_waiting');
 check(true, 'finisher waits for the others');
 
 await col(1).getByText('Leave').click();
+await col(1).getByTestId('sage-review-continue').waitFor({ timeout: 5000 });
+check((await text(1)).includes('Game over'), 'a player who leaves gets the review too');
+await col(1).getByTestId('sage-review-continue').click();
 await col(0).getByText('You won!').waitFor({ timeout: 5000 });
 await col(1).getByText('You placed #2').waitFor({ timeout: 5000 });
 await page.waitForTimeout(300);

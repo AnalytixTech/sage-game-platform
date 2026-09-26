@@ -47,11 +47,11 @@ const JAPABUDZ_WORDS = {
   categoryName: 'Custom Terms',
   wordSelectionMode: 'combine',
   words: [
-    { token: 'PASSPORT', display: 'Passport' },
-    { token: 'VISA', display: 'Visa' },
-    { token: 'IMMIGRATION', display: 'Immigration' },
-    { token: 'CAMPUS', display: 'Campus' },
-    { token: 'SCHOLARSHIP', display: 'Scholarship' },
+    { token: 'PASSPORT', display: 'Passport', definition: 'An official document that proves who you are when you travel abroad' },
+    { token: 'VISA', display: 'Visa', definition: 'Permission from a country to enter, stay or study there', note: 'Apply early: processing can take weeks.' },
+    { token: 'IMMIGRATION', display: 'Immigration', definition: 'Moving to live permanently in another country' },
+    { token: 'CAMPUS', display: 'Campus', definition: 'The grounds and buildings of a university or college' },
+    { token: 'SCHOLARSHIP', display: 'Scholarship', definition: 'Money given to a student to help pay for their education' },
   ],
   gridSize: 10,
   difficulty: 'medium',
@@ -125,7 +125,11 @@ function WebApp() {
     return (
       <Web.SageGameProvider games={Web.allGames} theme={theme} reduceMotion={reduceMotion} baseUrl="https://mock" fetch={mockFetch(gameId)}>
         <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: theme.colors.background }}>
-          <Web.GameLauncher getSession={async () => ({ sessionId: 'sess_demo', sessionToken: 'stk_demo' })} onClose={() => undefined} />
+          <Web.GameLauncher
+            getSession={async () => ({ sessionId: 'sess_demo', sessionToken: 'stk_demo' })}
+            onClose={() => undefined}
+            reviewBeforeResult={params.get('review') !== '0'}
+          />
         </div>
       </Web.SageGameProvider>
     );
@@ -191,6 +195,7 @@ function App() {
           <GameLauncher
             getSession={async () => ({ sessionId: 'sess_demo', sessionToken: 'stk_demo' })}
             onClose={() => undefined}
+            reviewBeforeResult={params.get('review') !== '0'}
           />
         </View>
       </SageGameProvider>

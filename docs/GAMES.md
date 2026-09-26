@@ -72,13 +72,22 @@ Find hidden words by dragging across them, or by tapping the first and last lett
 
 | Config | Default | |
 | --- | --- | --- |
-| `words` | built-in list | Up to 30: `[{ token, display?, definition? }]` |
+| `words` | built-in list | Up to 30: `[{ token, display?, definition?, note? }]` |
 | `wordSelectionMode` | | `custom_only`, `default_only` or `combine` (your words plus the built-in list) |
 | `categoryName` | | Shown to players |
 | `gridSize` | 12 (10 easy, 14 hard) | 6–15; grows to fit the longest word |
 | `difficulty` | `medium` | `hard` adds backwards and diagonal words |
 
 Words that can't fit are listed in `skippedWords` instead of being dropped silently.
+
+**Definitions.** Once a word is found, tapping any of its letters in the grid, or its chip in the list, opens a popup with its `definition` (and `note`, if given). It works during play and on the review board after the game. Unfound words, and words without a definition, open nothing, so the list never gives answers away. The rule for taps:
+
+- a tap (press and release on the same letter) on a found word, with no selection started, opens its definition and makes no move;
+- with a selection started (the first letter already tapped), a tap finishes or cancels the selection as usual;
+- drags work as before, even when they start on a found word;
+- a letter shared by two found words shows the one found last.
+
+The clock keeps running while a definition is open (opening one never adds a pause to the replay). The hint "Tap a found word to see its meaning" appears once a found word has a definition. Replace the popup with the `WordDefinition` slot, and track opens with the provider's `onWordDefinition`.
 
 ## Word Rush
 

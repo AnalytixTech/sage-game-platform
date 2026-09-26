@@ -463,6 +463,16 @@ describe('SageGames API', () => {
       expect(shell.headers['content-security-policy']).toContain(env.config.supabaseUrl);
       expect((await api.get('/portal/apps/abc')).text).toContain('<div id="root">');
       expect((await api.get('/')).headers.location).toBe('/portal/');
+
+      // The docs, public as plain Markdown (no sign-in, no JavaScript).
+      const index = await api.get('/portal/docs/llms.txt');
+      expect(index.status).toBe(200);
+      expect(index.text).toContain('/portal/docs/sdk.md');
+      const sdk = await api.get('/portal/docs/sdk.md');
+      expect(sdk.status).toBe(200);
+      expect(sdk.headers['content-type']).toContain('text/markdown');
+      expect(sdk.text).toContain('# SDK reference');
+      expect((await api.get('/portal/docs/sdk')).text).toContain('<div id="root">'); // the docs site itself
     });
 
     it('returns JSON errors for bad input', async () => {

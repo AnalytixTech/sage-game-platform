@@ -7,6 +7,7 @@ export type { CompletionResult, SessionCredentials, Leaderboard, Game, MatchStan
 // Web UI
 export * from './components';
 export * from './match';
+export * from './review';
 export * from './games';
 
 // Building blocks for custom game views and slots: <ui.Button/>, <ui.Surface/>, ui.useMotion()…

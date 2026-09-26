@@ -1,8 +1,10 @@
-# SageGames developer guide (SDK 2.2)
+# SageGames developer guide (SDK 2.3)
 
 This guide covers adding SageGames to a React Native / Expo or React web app. You get five playable games — Quiz Master, Memory Match, Sudoku Arena, Word Search and Word Rush — with scores the server verifies, leaderboards, webhooks and [online battles](BATTLES.md) between two or more players.
 
 New here? The [quickstart](QUICKSTART.md) gets a verified game running in about 10 minutes.
+
+Every page of these docs is also published as plain Markdown, with no sign-in, for you and your tools (coding assistants, search): `https://<api-host>/portal/docs/llms.txt` lists them, and `https://<api-host>/portal/docs/<page>.md` serves each one (for example `sdk.md`).
 
 ## How it fits together
 
@@ -103,8 +105,8 @@ The same API is exported by `@sagegames/react-native` and `@sagegames/react`.
 
 | Export | What it does |
 | --- | --- |
-| `SageGameProvider` | Required at the root. Props: `games` (usually `allGames`), `baseUrl`, `theme`, `themeOverrides`, `labels`, `pendingStore`, `fetch`. |
-| `GameLauncher` | The whole flow: intro → game → verified result + leaderboard, with pause, quit, retries and "Play again". Props: `getSession` (preferred) or `session`, `onComplete`, `onError`, `onEvent`, `onClose`, `autoStart`, `showLeaderboard`, `renderHeader`, `hideChrome`. |
+| `SageGameProvider` | Required at the root. Props: `games` (usually `allGames`), `baseUrl`, `theme`, `themeOverrides`, `labels`, `pendingStore`, `fetch`, `onWordDefinition`. |
+| `GameLauncher` | The whole flow: intro → game → review of the finished board → verified result + leaderboard, with pause, quit, retries and "Play again". Props: `getSession` (preferred) or `session`, `onComplete`, `onError`, `onEvent`, `onClose`, `autoStart`, `showLeaderboard`, `reviewBeforeResult`, `renderHeader`, `renderReview`, `hideChrome`. |
 | `GameCatalog` | List of games the app can play. `onSelectGame(game)`. |
 | `GamePreview` | Plays a game locally with no session, for demos and tutorials. Scores aren't submitted. |
 | `LeaderboardList` / `useLeaderboard(session, { scope })` | Leaderboard for a session's context (`scope: 'context'`, the default) or the whole app (`'game'`). |
@@ -131,6 +133,7 @@ The same API is exported by `@sagegames/react-native` and `@sagegames/react`.
 
 - **Network drops at the end of a game.** The result is retried with backoff. With a `pendingStore` (AsyncStorage or localStorage), an unsent result survives the app closing and is submitted the next time that session loads.
 - **App backgrounded or tab hidden.** Games that allow pausing (Memory, Sudoku, Word Search) pause. Timed games (Quiz, Word Rush) keep running, and if time runs out while away, the game ends normally and the result still verifies.
+- **App backgrounded during the review.** The result is already being submitted (or saved to the `pendingStore`), so leaving the app on the review screen loses nothing.
 - **Outdated app.** If the server has newer game rules than the SDK, the launcher shows "Please update the app" instead of a broken game.
 
 ## Design, theming and labels

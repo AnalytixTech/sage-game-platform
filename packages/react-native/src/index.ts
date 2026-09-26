@@ -10,6 +10,8 @@ export * from './MatchLauncher';
 export * from './GamePreview';
 export * from './GameCatalog';
 export { LeaderboardList, ResultView } from './ui/ResultView';
+export { ReviewView } from './ui/ReviewView';
+export type { RenderReview, ReviewInfo } from './ui/ReviewView';
 export * from './games';
 
 // Building blocks for custom game views and slots: <ui.Button/>, <ui.Surface/>, ui.useMotion()…
