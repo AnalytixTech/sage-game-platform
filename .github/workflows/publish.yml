@@ -1,12 +1,20 @@
 name: Publish NPM Packages
 
-# Publishes when a version tag (e.g. v2.1.0) is pushed, or on demand from the Actions tab
-# (Publish NPM Packages → Run workflow). Versions already on npm are skipped either way.
+# Publishes on every push to main (a merged PR), on version tags (e.g. v2.1.0), and on demand from
+# the Actions tab. Only versions that aren't on npm yet are published, so a merge publishes exactly
+# the packages whose version was bumped, and nothing otherwise.
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
+
+# A tag and a merge of the same commit must not publish at the same time.
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
 
 permissions:
   contents: read

@@ -142,6 +142,42 @@ SAGEGAMES_IMAGE=ghcr.io/analytixtech/sage-game-platform:<sha> docker compose pul
 SAGEGAMES_IMAGE=… docker compose run --rm sagegames-migrate && SAGEGAMES_IMAGE=… docker compose up -d --wait
 ```
 
+## Automatic deployment (GitHub Actions)
+
+Every merge to `main` goes through the following:
+
+1. **CI:** tests on every database.
+2. **Docker:** builds the image and runs it with Compose, on SQLite and Postgres.
+3. **Deploy:** connects to the server over SSH and runs [`deploy/remote-deploy.sh`](../deploy/remote-deploy.sh), which:
+   1. checks the commit is on `main`
+   2. builds `sagegames:<short-sha>`
+   3. runs the migrations
+   4. starts the new version and waits until it's healthy
+   5. checks the public `/healthz`
+
+   If the new version doesn't become healthy, the previous image is started again and the run fails. The last 3 images are kept for rollback.
+
+The same merge publishes any bumped package versions to npm (the **Publish NPM Packages** workflow).
+
+**The deploy key can only deploy.** It's a dedicated key whose `authorized_keys` entry forces `/usr/local/bin/sagegames-deploy`, a copy of `deploy/remote-deploy.sh` installed on the server. It has no shell, port forwarding or agent forwarding. When `remote-deploy.sh` changes, reinstall it by hand (it isn't updated automatically, so a commit can't change what the key is allowed to do):
+
+```bash
+install -o root -g root -m 0755 /opt/apps/sagegames/deploy/remote-deploy.sh /usr/local/bin/sagegames-deploy
+```
+
+**Secrets** (repository → Settings → Environments → `production`):
+
+| Secret | Value |
+| --- | --- |
+| `VPS_HOST` | The server address |
+| `VPS_SSH_KEY` | The private deploy key |
+| `VPS_KNOWN_HOSTS` | The server's host key line (`ssh-keyscan -t ed25519 <host>`), so the connection can't be intercepted |
+| `BREVO_API_KEY`, `SENTRY_DSN` | Optional. Written to the server's `.env` on each deploy |
+
+Only `BREVO_API_KEY`, `SENTRY_DSN`, `EMAIL_FROM`, `LOG_LEVEL` and `SAGE_TENANT_KEYS` can be set this way. The secrets generated on the server stay there and never pass through GitHub: the database password, `API_KEY_PEPPER` and `AUTH_JWT_SECRET`.
+
+**Redeploy or roll back by hand:** Actions → **Deploy** → **Run workflow**, with an optional commit SHA from `main`.
+
 ## Database migrations
 
 Migrations are TypeScript, built into the image (`services/api/src/db/migrations`), one set for every database. Each is applied once and recorded in `sagegames_migrations`, under a lock (an advisory lock on Postgres, `GET_LOCK` on MySQL, the single writer on SQLite).
