@@ -1,0 +1,92 @@
+# Deploys main to the VPS after the Docker workflow has built and tested the image for that commit.
+# Also runnable by hand (Actions → Deploy → Run workflow), e.g. to redeploy or roll back to a commit.
+#
+# The SSH key can only run deploy/remote-deploy.sh on the server (a forced command): it checks the
+# commit is on main, builds, migrates, starts, waits for health, and rolls back if it isn't healthy.
+#
+# Repository → Settings → Environments → "production" → secrets:
+#   VPS_HOST         server address (e.g. 162.35.27.204)
+#   VPS_SSH_KEY      private deploy key (the forced-command key, not a personal key)
+#   VPS_KNOWN_HOSTS  the server's SSH host key line(s), so the connection can't be intercepted
+#   BREVO_API_KEY    optional: written to the server's .env on each deploy
+#   SENTRY_DSN       optional: written to the server's .env on each deploy
+# Optional environment variable (not secret): VPS_SSH_PORT (default 22), VPS_USER (default root).
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [Docker]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit on main to deploy (default: the latest)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only after a successful Docker run on a push to main (not on pull requests).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://sagegames.sageanalytix.cloud
+    steps:
+      - name: Which commit
+        id: target
+        run: |
+          sha="${{ github.event.workflow_run.head_sha || inputs.sha || github.sha }}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Deploying $sha"
+
+      - name: SSH key and known host
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          for v in VPS_SSH_KEY VPS_KNOWN_HOSTS VPS_HOST; do
+            if [ -z "${!v}" ]; then echo "::error::The $v secret is missing (Settings → Environments → production)."; exit 1; fi
+          done
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy on the server
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
+          VPS_USER: ${{ vars.VPS_USER || 'root' }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: |
+          # Settings travel on stdin (never on the command line or in logs); empty ones are skipped.
+          {
+            [ -n "$BREVO_API_KEY" ] && printf 'BREVO_API_KEY=%s\n' "$BREVO_API_KEY"
+            [ -n "$SENTRY_DSN" ] && printf 'SENTRY_DSN=%s\n' "$SENTRY_DSN"
+            true
+          } | ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+                -o ServerAliveInterval=30 "$VPS_USER@$VPS_HOST" "deploy ${{ steps.target.outputs.sha }}"
+
+      - name: Check the public site
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS https://sagegames.sageanalytix.cloud/healthz; then echo; exit 0; fi
+            sleep 5
+          done
+          echo "::error::https://sagegames.sageanalytix.cloud/healthz is not answering"
+          exit 1
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
