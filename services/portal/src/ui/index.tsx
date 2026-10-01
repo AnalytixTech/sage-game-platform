@@ -76,17 +76,22 @@ export const useToast = () => useContext(ToastContext);
 
 export function Modal({ open, onClose, title, children, dismissable = true }: { open: boolean; onClose: () => void; title: string; children: ReactNode; dismissable?: boolean }) {
   const dialog = useRef<HTMLDivElement>(null);
+  // Callers pass inline handlers, so read the latest ones from a ref: re-running the focus effect on
+  // every parent render would yank focus out of the field being typed in.
+  const latest = useRef({ onClose, dismissable });
+  latest.current = { onClose, dismissable };
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    dialog.current?.querySelector<HTMLElement>('input, button, [tabindex]')?.focus();
-    const onKey = (e: KeyboardEvent) => dismissable && e.key === 'Escape' && onClose();
+    const root = dialog.current;
+    (root?.querySelector<HTMLElement>('input, textarea, select') ?? root?.querySelector<HTMLElement>('button, [tabindex]'))?.focus();
+    const onKey = (e: KeyboardEvent) => latest.current.dismissable && e.key === 'Escape' && latest.current.onClose();
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
       prev?.focus?.();
     };
-  }, [open, onClose, dismissable]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="modal-backdrop" onMouseDown={(e) => dismissable && e.target === e.currentTarget && onClose()}>
