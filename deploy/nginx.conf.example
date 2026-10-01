@@ -1,0 +1,54 @@
+# SageGames behind a shared nginx (in Docker on the "proxy" network, or on the host with the app
+# published on 127.0.0.1:<port>). TLS certificates are managed by your usual tooling (certbot…).
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+upstream sagegames {
+    # In Docker on the shared network:
+    server sagegames-app:4000;
+    # nginx on the host instead: server 127.0.0.1:14000;  (with ports: 127.0.0.1:14000:4000 in compose.yml)
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    server_name sagegames.japabudz.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name sagegames.japabudz.com;
+
+    ssl_certificate     /etc/letsencrypt/live/sagegames.japabudz.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sagegames.japabudz.com/privkey.pem;
+
+    client_max_body_size 1m;   # API bodies are at most 256 KB
+
+    # Battles: WebSocket upgrade, kept open (the app pings every 25 s).
+    location = /v2/ws {
+        proxy_pass http://sagegames;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location / {
+        proxy_pass http://sagegames;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}

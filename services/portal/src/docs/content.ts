@@ -15,6 +15,7 @@ import architecture from '../../../../docs/ARCHITECTURE.md?raw';
 import deployment from '../../../../docs/DEPLOYMENT.md?raw';
 import troubleshooting from '../../../../docs/TROUBLESHOOTING.md?raw';
 import movingTo3 from '../../../../docs/MOVING_TO_3.md?raw';
+import docker from '../../../../docs/DOCKER.md?raw';
 import changelog from '../../../../CHANGELOG.md?raw';
 
 import { DocPageMeta, PAGE_META } from './pages';
@@ -36,6 +37,7 @@ const SOURCES: Record<string, string> = {
   sdk,
   architecture,
   'self-hosting': deployment,
+  docker,
   'moving-to-3': movingTo3,
   troubleshooting,
   changelog,

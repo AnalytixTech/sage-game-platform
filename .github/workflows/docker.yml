@@ -1,0 +1,139 @@
+# Builds the production image and runs it the way the VPS does (compose.yml): migrations, health,
+# the API, the portal, a battle WebSocket, hardening and data persistence, on SQLite and on the
+# bundled Postgres. On main and version tags, the tested image is pushed to GitHub's registry.
+#
+# Secrets: none beyond the built-in GITHUB_TOKEN (used only to push to ghcr.io).
+name: Docker
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgres]
+    env:
+      COMPOSE_PROJECT_NAME: sagegames-ci-${{ matrix.database }}
+      SAGEGAMES_IMAGE: sagegames:ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint the Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Configure (.env from .env.example, with throwaway secrets)
+        run: |
+          cp .env.example .env
+          set_var() { sed -i "s|^$1=.*|$1=$2|" .env; }
+          set_var API_KEY_PEPPER "$(openssl rand -hex 32)"
+          set_var AUTH_JWT_SECRET "$(openssl rand -hex 32)"
+          set_var PUBLIC_BASE_URL "https://games.example.com"
+          set_var COMPOSE_PROJECT_NAME "$COMPOSE_PROJECT_NAME"
+          set_var SAGEGAMES_IMAGE "$SAGEGAMES_IMAGE"
+          set_var RELEASE "${GITHUB_SHA::12}"
+          if [ "${{ matrix.database }}" = postgres ]; then
+            pw="$(openssl rand -hex 16)"
+            set_var POSTGRES_PASSWORD "$pw"
+            set_var DATABASE_URL "postgres://sagegames:$pw@sagegames-db:5432/sagegames"
+            echo "COMPOSE_PROFILES=postgres" >> .env
+          fi
+
+      - name: Validate the Compose file
+        run: docker compose config --quiet && docker compose --profile tools config --services
+
+      - name: Build
+        run: docker compose build
+
+      - name: Shared proxy network (as on the VPS)
+        run: docker network create proxy
+
+      - name: Migrate
+        run: docker compose run --rm sagegames-migrate
+
+      - name: Start
+        run: docker compose up -d --wait --wait-timeout 120
+
+      - name: Checks inside the container network
+        run: |
+          set -e
+          run() { docker compose exec -T sagegames-app node -e "$1"; }
+          echo "health:"; run "fetch('http://127.0.0.1:4000/healthz').then(r=>r.json()).then(j=>{console.log(j);process.exit(j.ok&&j.migrations==='current'?0:1)})"
+          echo "games:";  run "fetch('http://127.0.0.1:4000/v2/games').then(r=>r.json()).then(g=>{console.log(g.length,'games');process.exit(g.length===5?0:1)})"
+          echo "portal:"; run "fetch('http://127.0.0.1:4000/portal/').then(r=>{console.log(r.status);process.exit(r.ok?0:1)})"
+          echo "docs:";   run "fetch('http://127.0.0.1:4000/portal/docs/llms.txt').then(r=>{console.log(r.status);process.exit(r.ok?0:1)})"
+          echo "websocket:"
+          run "const W=require(require.resolve('ws',{paths:['/app/services/api']}));const s=new W('ws://127.0.0.1:4000/v2/ws');s.on('open',()=>s.send(JSON.stringify({type:'auth',token:'stk_nope'})));s.on('message',m=>{const j=JSON.parse(m);console.log(j);process.exit(j.code==='invalid_token'?0:1)});setTimeout(()=>process.exit(1),5000)"
+
+      - name: Reachable by name on the proxy network, and not published on the host
+        run: |
+          set -e
+          docker run --rm --network proxy curlimages/curl:8.10.1 -fsS http://sagegames-app:4000/healthz
+          test -z "$(docker compose port sagegames-app 4000 2>/dev/null || true)"
+
+      - name: Hardening
+        run: |
+          set -e
+          test "$(docker compose exec -T sagegames-app id -u)" != 0
+          ! docker compose exec -T sagegames-app sh -c 'touch /app/should-fail' 2>/dev/null
+          docker compose exec -T sagegames-app sh -c 'touch /tmp/ok && touch /app/data/ok'
+          docker inspect "$(docker compose ps -q sagegames-app)" --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.HostConfig.SecurityOpt}} {{.HostConfig.Memory}}'
+
+      - name: Data survives recreating the container
+        run: |
+          set -e
+          docker compose exec -T sagegames-app node services/api/dist/scripts/create-user.js ci@example.com 'Ci-check-pass-1'
+          docker compose up -d --force-recreate --wait --wait-timeout 120
+          out="$(docker compose exec -T sagegames-app node services/api/dist/scripts/create-user.js ci@example.com 'Ci-check-pass-1' 2>&1 || true)"
+          echo "$out"
+          echo "$out" | grep -q "already has an account"
+
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Clean up
+        if: always()
+        run: docker compose --profile postgres --profile tools down -v
+
+  publish:
+    if: github.event_name == 'push'
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

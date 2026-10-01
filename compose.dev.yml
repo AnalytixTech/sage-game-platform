@@ -1,0 +1,44 @@
+# Local development only: database servers for running the API and its tests against MySQL,
+# MariaDB and Postgres. The app itself runs with npm as usual (hot reload, source maps).
+# Never use this file in production.
+#
+#   docker compose -f compose.dev.yml up -d
+#   TEST_MYSQL_URL=mysql://root:dev@127.0.0.1:13306/mysql \
+#   TEST_MARIADB_URL=mysql://root:dev@127.0.0.1:13307/mysql \
+#   TEST_POSTGRES_URL=postgres://postgres:dev@127.0.0.1:15432/postgres npm test
+#   docker compose -f compose.dev.yml down -v
+#
+# Ports are bound to 127.0.0.1 only, on numbers unlikely to clash with other projects.
+
+name: sagegames-dev
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_PASSWORD: dev
+    ports: ["127.0.0.1:15432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 20
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: dev
+    ports: ["127.0.0.1:13306:3306"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pdev"]
+      interval: 5s
+      retries: 30
+
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_ROOT_PASSWORD: dev
+    ports: ["127.0.0.1:13307:3306"]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 30

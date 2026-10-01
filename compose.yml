@@ -1,0 +1,168 @@
+# SageGames: production Compose file for one product on a shared VPS. See docs/DOCKER.md.
+#
+#   cp .env.example .env            # fill in the secrets
+#   docker compose build
+#   docker compose run --rm sagegames-migrate
+#   docker compose up -d
+#
+# With the bundled Postgres instead of an external database, add `--profile postgres` to every
+# command (or set COMPOSE_PROFILES=postgres in .env).
+#
+# Nothing is published on the host: the shared reverse proxy (Caddy/nginx) reaches the app over the
+# external "proxy" network as sagegames-app:4000. The database is only on this project's network.
+
+name: ${COMPOSE_PROJECT_NAME:-sagegames}
+
+x-app: &app
+  image: ${SAGEGAMES_IMAGE:-sagegames:latest}
+  build:
+    context: .
+    dockerfile: Dockerfile
+  # Only the app's own settings reach the container (values come from .env in this directory).
+  # Compose stops with the message if a required one is missing.
+  environment:
+    NODE_ENV: production
+    PORT: "4000"
+    # Keep V8's heap inside the container's memory limit.
+    NODE_OPTIONS: --max-old-space-size=${SAGEGAMES_HEAP_MB:-384}
+    DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+    API_KEY_PEPPER: ${API_KEY_PEPPER:?Set API_KEY_PEPPER in .env (32+ characters)}
+    AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?Set AUTH_JWT_SECRET in .env (32+ characters)}
+    PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
+    BREVO_API_KEY: ${BREVO_API_KEY:-}
+    EMAIL_FROM: ${EMAIL_FROM:-}
+    DATABASE_SSL: ${DATABASE_SSL:-auto}
+    DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
+    SAGE_TENANT_KEYS: ${SAGE_TENANT_KEYS:-}
+    SENTRY_DSN: ${SENTRY_DSN:-}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    LOG_FORMAT: ${LOG_FORMAT:-json}
+    RELEASE: ${RELEASE:-}
+  user: "1000:1000"
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  volumes:
+    # SQLite lives here when DATABASE_URL=sqlite:/app/data/sagegames.db; harmless otherwise.
+    - sagegames-data:/app/data
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  # The whole platform: game API, battle WebSockets, webhook worker and portal. Exactly ONE
+  # replica: battle rooms are held in this process's memory.
+  sagegames-app:
+    <<: *app
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "${SAGEGAMES_CPUS:-1.0}"
+          memory: ${SAGEGAMES_MEMORY:-512M}
+          pids: 256
+        reservations:
+          cpus: "0.25"
+          memory: 192M
+    depends_on:
+      sagegames-db:
+        condition: service_healthy
+        required: false
+    networks:
+      default: {}
+      proxy:
+        # Unique name on the shared network (other products may also have an "app" service).
+        aliases: [sagegames-app]
+    # No `ports:`. Only if the reverse proxy runs on the host instead of in Docker, publish on
+    # loopback with a port no other product uses, e.g.:
+    # ports:
+    #   - "127.0.0.1:${SAGEGAMES_HOST_PORT:-14000}:4000"
+
+  # Applies pending database migrations, then exits. Run before starting a new version:
+  #   docker compose run --rm sagegames-migrate
+  # Migrations are additive and run under a lock, so running it twice is harmless.
+  sagegames-migrate:
+    <<: *app
+    profiles: [tools]
+    restart: "no"
+    command: ["node", "services/api/dist/scripts/migrate.js"]
+    depends_on:
+      sagegames-db:
+        condition: service_healthy
+        required: false
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 384M
+    networks:
+      default: {}
+
+  # Optional Postgres on this VPS (profile "postgres"). Skip it when DATABASE_URL points to a
+  # managed database or when using SQLite. Never published on the host.
+  sagegames-db:
+    image: postgres:16-bookworm
+    profiles: [postgres]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sagegames}
+      POSTGRES_USER: ${POSTGRES_USER:-sagegames}
+      # Required with this profile (the image refuses to start without it).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - sagegames-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 6
+    shm_size: 128m
+    stop_grace_period: 30s
+    # The entrypoint initialises the data directory as root, then drops to the postgres user.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "${SAGEGAMES_DB_CPUS:-1.0}"
+          memory: ${SAGEGAMES_DB_MEMORY:-512M}
+          pids: 256
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      default: {}
+
+networks:
+  # This project's private network (app <-> database).
+  default:
+    name: ${COMPOSE_PROJECT_NAME:-sagegames}-internal
+  # Shared with the reverse proxy; created once per VPS: docker network create proxy
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxy}
+
+volumes:
+  sagegames-data:
+  sagegames-pgdata:

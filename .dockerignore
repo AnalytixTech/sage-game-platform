@@ -1,14 +1,43 @@
+# Keep the build context small and free of secrets. Everything the image needs is listed in the
+# Dockerfile's COPY lines.
+
+# VCS, CI and editor files
 .git
+.github
+.gitignore
+.vscode
+.idea
+*.swp
+.DS_Store
+Thumbs.db
+
+# Dependencies and build output (rebuilt inside the image)
 **/node_modules
 **/dist
 **/*.tsbuildinfo
-.ui-shots
-.e2e
-data
+**/.vite
+**/coverage
+
+# Secrets and local configuration (the image never contains them)
 **/.env
 **/.env.*
 !**/.env.example
+*.pem
+*.key
+
+# Local data, logs and test artifacts
+data
+.e2e
+.ui-shots
 *.log
+*.ndjson
+**/test-results
+**/playwright-report
+
+# Not used by the image
 supabase
-test
 tools
+test
+compose*.yml
+Dockerfile*
+railway.json

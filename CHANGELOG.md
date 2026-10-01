@@ -27,6 +27,12 @@ Self-host anywhere, on any SQL database, with no Supabase. **SDK 2.x apps work u
 
 - A production `Dockerfile`: multi-stage, non-root, with a health check, migrations on start and a volume for SQLite.
 - A `railway.json` with pre-deploy migrations, a health check, restart on failure and one replica.
+- Docker on a shared VPS: `compose.yml` with the following, documented in [Docker deployment](docs/DOCKER.md):
+  - no published ports, the shared `proxy` network, an optional bundled Postgres profile and a one-off migrate service
+  - resource and PID limits, a read-only root filesystem, no capabilities and rotated logs
+  - Caddy and nginx examples (WebSockets included)
+- A Docker CI workflow that builds and runs the image on SQLite and Postgres, then pushes it to GHCR from `main`.
+- The image's default command no longer migrates on start: run migrations as a separate step, or add `--migrate`.
 - A new self-hosting guide covering Docker, Railway step by step, choosing a database, configuration, custom domains, email, backups per database and the one-instance rule.
 - Battles keep running on the platform's own WebSocket server, now with a 25-second heartbeat (inside proxy idle timeouts) and a `MatchBus` seam for multi-instance support later. The server warns when a second instance shares the database.
 - New settings: `DATABASE_URL` (any scheme), `DATABASE_POOL_SIZE`, `AUTH_JWT_SECRET`, `BREVO_API_KEY`, `EMAIL_FROM`, `RELEASE`. Removed: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`.
