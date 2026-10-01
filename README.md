@@ -11,7 +11,8 @@ The same docs are built into the developer portal at `/portal/docs`, with search
 - **API keys and the developer portal:** [docs/KEYS_SETUP.md](docs/KEYS_SETUP.md)
 - **API reference:** [docs/openapi.yaml](docs/openapi.yaml)
 - **What changed:** [CHANGELOG.md](CHANGELOG.md)
-- **Deploying (Supabase + Render):** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- **Self-hosting (Docker, Railway, any SQL database):** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- **Moving a 2.x deployment:** [docs/MOVING_TO_3.md](docs/MOVING_TO_3.md)
 - **How it works:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ```bash

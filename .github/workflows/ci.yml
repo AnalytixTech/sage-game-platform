@@ -7,8 +7,39 @@ on:
       - main
 
 jobs:
+  # The API suite runs on every supported database: SQLite and PGlite in-process, and real
+  # MySQL 8, MariaDB and Postgres servers here (vitest picks them up from TEST_*_URL).
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: sagegames
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -psagegames"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: sagegames
+        ports: ['3307:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: sagegames
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      TEST_MYSQL_URL: mysql://root:sagegames@127.0.0.1:3306/mysql
+      TEST_MARIADB_URL: mysql://root:sagegames@127.0.0.1:3307/mysql
+      TEST_POSTGRES_URL: postgres://postgres:sagegames@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v4
 
@@ -57,7 +88,7 @@ jobs:
       - name: Play every game
         run: npm run test:ui
 
-      # Two players race a battle through the real API (in-memory Postgres) over WebSockets.
+      # Two players race a battle through the real API (in-memory SQLite) over WebSockets.
       - name: Start battle server
         run: npm run battle-server > battle-server.log 2>&1 &
 
@@ -76,6 +107,11 @@ jobs:
 
       - name: Portal and docs pages
         run: npm run test:portal
+
+      # The production server (--migrate) on a SQLite file: sign up, confirm, sign in, reset the
+      # password in the real portal, then an app, keys, webhook, quiz bank and a verified game.
+      - name: Full flow
+        run: node tools/e2e/full-flow.mjs sqlite:./.e2e/sagegames.db
 
       - name: Server logs
         if: failure()

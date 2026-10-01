@@ -1,0 +1,14 @@
+.git
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.ui-shots
+.e2e
+data
+**/.env
+**/.env.*
+!**/.env.example
+*.log
+supabase
+test
+tools

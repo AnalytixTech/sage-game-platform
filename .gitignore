@@ -62,3 +62,7 @@ tools/docs/.samples/
 # Copied from the root CHANGELOG.md when the SDK packages are packed
 packages/react/CHANGELOG.md
 packages/react-native/CHANGELOG.md
+
+# Local databases and end-to-end runs
+data/
+.e2e/

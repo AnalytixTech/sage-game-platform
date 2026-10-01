@@ -99,7 +99,7 @@ describe('online battles', () => {
     await realtime.close();
     server.closeAllConnections(); // upgraded WebSocket sockets would otherwise keep close() waiting
     await new Promise((r) => server.close(r));
-    await env.db.close(); // each test gets its own in-memory Postgres
+    await env.close(); // each test gets its own empty database
   });
 
   const player = () => {
@@ -116,10 +116,7 @@ describe('online battles', () => {
 
   /** The deck, from the database: players never receive the seed of a hidden-information game. */
   const deckOf = async (matchId: string) => {
-    const [row] = await env.db.query<{ seed: string; resolved_config: Record<string, unknown> }>(
-      'SELECT seed, resolved_config FROM matches WHERE id = $1',
-      [matchId]
-    );
+    const row = await env.db.selectFrom('sagegames_matches').select(['seed', 'resolved_config']).where('id', '=', matchId).executeTakeFirstOrThrow();
     return pairsOf(row.seed, row.resolved_config);
   };
 
@@ -173,9 +170,11 @@ describe('online battles', () => {
 
     // Stored like solo games, plus the match record and webhook.
     await sleep(50);
-    const results = await env.db.query<{ external_user_id: string; status: string; score: number }>(
-      'SELECT external_user_id, status, score FROM game_results ORDER BY external_user_id'
-    );
+    const results = await env.db
+      .selectFrom('sagegames_game_results')
+      .select(['external_user_id', 'status', 'score'])
+      .orderBy('external_user_id')
+      .execute();
     expect(results).toEqual([
       { external_user_id: 'ada', status: 'verified', score: 900 },
       { external_user_id: 'bayo', status: 'verified', score: 300 },
@@ -183,7 +182,7 @@ describe('online battles', () => {
     const view = await api.get(`/v2/matches/${match.matchId}`).set(auth(apiKey));
     expect(view.body.status).toBe('finished');
     expect(view.body.standings[0].externalUserId).toBe('ada');
-    const hooks = await env.db.query<{ event_type: string }>('SELECT event_type FROM webhook_deliveries');
+    const hooks = await env.db.selectFrom('sagegames_webhook_deliveries').select('event_type').execute();
     expect(hooks).toEqual([]); // no webhook URL configured for this app
   });
 
@@ -213,7 +212,7 @@ describe('online battles', () => {
 
   it('cancels a lobby that times out without enough ready players', async () => {
     const match = await createMatch({ players: [{ externalUserId: 'a' }, { externalUserId: 'b' }] });
-    await env.db.query(`UPDATE matches SET lobby_expires_at = now() + interval '200 milliseconds' WHERE id = $1`, [match.matchId]);
+    await env.db.updateTable('sagegames_matches').set({ lobby_expires_at: new Date(Date.now() + 200) }).where('id', '=', match.matchId).execute();
     const a = player();
     await a.join(await tokenFor(match.matchId, 'a'));
     a.send({ type: 'ready' });

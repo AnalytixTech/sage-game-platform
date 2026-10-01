@@ -1,14 +1,13 @@
 /**
- * Developer portal API. Hosts sign in with Supabase Auth (email + password, confirmed email) and
- * manage their apps: games, API keys, webhook and usage. Every request carries the Supabase access
- * token as a bearer token; there are no cookies, so no CSRF surface.
+ * Developer portal API. Hosts sign in with a portal account (routes/auth.ts) and manage their apps:
+ * games, API keys, webhook, quiz banks and usage. App routes take the access token as a bearer
+ * token (never a cookie), so they have no CSRF surface.
  */
 import { Router } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { z } from 'zod';
-import { PortalUser } from '../auth/portalAuth';
+import { PortalUser } from '../auth/accounts';
 import { ALL_GAME_IDS } from '../catalog';
-import { one } from '../db/db';
 import { createAuth } from '../http/auth';
 import { AppContext } from '../http/context';
 import { asyncHandler, HttpError, parse } from '../http/errors';
@@ -27,6 +26,7 @@ import {
 } from '../services/tenants';
 import { deleteQuizBank, getQuizBank, listQuizBanks, quizBankBody, saveQuizBank } from '../services/quizBanks';
 import { listResults } from '../services/results';
+import { authRoutes } from './auth';
 
 const MAX_APPS_PER_USER = 10;
 
@@ -47,10 +47,13 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
       message: { error: 'Too many requests', code: 'rate_limited' },
     });
 
-  // Public values the portal needs to talk to Supabase Auth (the anon key is designed to be public).
+  // Public values the portal needs.
   router.get('/config', (_req, res) => {
-    res.json({ supabaseUrl: ctx.config.supabaseUrl, supabaseAnonKey: ctx.config.supabaseAnonKey, apiBaseUrl: ctx.config.publicBaseUrl });
+    res.json({ apiBaseUrl: ctx.config.publicBaseUrl });
   });
+
+  // Accounts: sign up, sign in, password and email changes (their own rate limits).
+  router.use('/auth', authRoutes(ctx, auth));
 
   router.use(perUser(60_000, 120), auth.requirePortalUser);
 
@@ -75,17 +78,18 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
     asyncHandler(async (req, res) => {
       const u = user(res);
       const body = parse(z.object({ name: appName, gameIds: gameIds.optional() }), req.body);
-      const owned = await one<{ n: number }>(
-        ctx.db,
-        `SELECT COUNT(*)::int AS n FROM tenant_members WHERE user_id = $1 AND role = 'owner'`,
-        [u.id]
-      );
-      if ((owned?.n ?? 0) >= MAX_APPS_PER_USER) {
+      const owned = await ctx.db
+        .selectFrom('sagegames_tenant_members')
+        .select((eb) => eb.fn.countAll<number>().as('n'))
+        .where('user_id', '=', u.id)
+        .where('role', '=', 'owner')
+        .executeTakeFirst();
+      if (Number(owned?.n ?? 0) >= MAX_APPS_PER_USER) {
         throw new HttpError(409, `You can own at most ${MAX_APPS_PER_USER} apps`, 'too_many_apps');
       }
-      const id = await ctx.db.tx((q) =>
-        createTenant(q, { name: body.name, ownerUserId: u.id, gameIds: body.gameIds ?? ALL_GAME_IDS })
-      );
+      const id = await ctx.db
+        .transaction()
+        .execute((q) => createTenant(q, { name: body.name, ownerUserId: u.id, gameIds: body.gameIds ?? ALL_GAME_IDS }, ctx.now()));
       const app = (await listTenantsForUser(ctx.db, u.id)).find((a) => a.id === id);
       res.status(201).json(app);
     })
@@ -107,8 +111,10 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
       const u = user(res);
       await member(req.params.appId, u.id);
       const body = parse(z.object({ name: appName.optional(), gameIds: gameIds.optional() }), req.body);
-      await ctx.db.tx(async (q) => {
-        if (body.name) await q.query('UPDATE tenants SET name = $2, updated_at = now() WHERE id = $1', [req.params.appId, body.name]);
+      await ctx.db.transaction().execute(async (q) => {
+        if (body.name) {
+          await q.updateTable('sagegames_tenants').set({ name: body.name, updated_at: ctx.now() }).where('id', '=', req.params.appId).execute();
+        }
         if (body.gameIds) await setGameAccess(q, req.params.appId, body.gameIds);
       });
       res.json((await listTenantsForUser(ctx.db, u.id)).find((a) => a.id === req.params.appId));
@@ -122,7 +128,7 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
       if ((await member(req.params.appId, u.id)) !== 'owner') {
         throw new HttpError(403, 'Only the owner can delete an app', 'forbidden');
       }
-      await ctx.db.query('DELETE FROM tenants WHERE id = $1', [req.params.appId]);
+      await ctx.db.deleteFrom('sagegames_tenants').where('id', '=', req.params.appId).execute();
       res.status(204).end();
     })
   );
@@ -152,7 +158,7 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
           label: body.label,
           userId: u.id,
           pepper: ctx.config.apiKeyPepper,
-        })
+        }, ctx.now())
       );
     })
   );
@@ -161,7 +167,7 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
     '/apps/:appId/keys/:keyId',
     asyncHandler(async (req, res) => {
       await member(req.params.appId, user(res).id);
-      await revokeApiKey(ctx.db, req.params.appId, req.params.keyId);
+      await revokeApiKey(ctx.db, req.params.appId, req.params.keyId, ctx.now());
       res.status(204).end();
     })
   );
@@ -172,16 +178,19 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
     '/apps/:appId/webhook',
     asyncHandler(async (req, res) => {
       await member(req.params.appId, user(res).id);
-      const row = await one<{ webhook_url: string | null; webhook_secret: string | null }>(
-        ctx.db,
-        'SELECT webhook_url, webhook_secret FROM tenants WHERE id = $1',
-        [req.params.appId]
-      );
-      const deliveries = await ctx.db.query<Record<string, unknown>>(
-        `SELECT id, event_type, status, attempts, last_error, created_at, delivered_at
-           FROM webhook_deliveries WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 20`,
-        [req.params.appId]
-      );
+      const row = await ctx.db
+        .selectFrom('sagegames_tenants')
+        .select(['webhook_url', 'webhook_secret'])
+        .where('id', '=', req.params.appId)
+        .executeTakeFirst();
+      const deliveries = await ctx.db
+        .selectFrom('sagegames_webhook_deliveries')
+        .select(['id', 'event_type', 'status', 'attempts', 'last_error', 'created_at', 'delivered_at'])
+        .where('tenant_id', '=', req.params.appId)
+        .orderBy('created_at', 'desc')
+        .orderBy('id', 'desc')
+        .limit(20)
+        .execute();
       res.json({
         url: row?.webhook_url ?? null,
         secret: row?.webhook_secret ?? null,
@@ -191,8 +200,8 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
           status: d.status,
           attempts: d.attempts,
           lastError: d.last_error,
-          createdAt: new Date(d.created_at as Date).toISOString(),
-          deliveredAt: d.delivered_at ? new Date(d.delivered_at as Date).toISOString() : null,
+          createdAt: d.created_at.toISOString(),
+          deliveredAt: d.delivered_at ? d.delivered_at.toISOString() : null,
         })),
       });
     })
@@ -204,7 +213,7 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
       await member(req.params.appId, user(res).id);
       const body = parse(z.object({ url: z.string().max(500).nullable() }), req.body);
       const url = body.url ? validateWebhookUrl(body.url, ctx.config.env === 'production') : null;
-      const saved = await setWebhook(ctx.db, req.params.appId, url);
+      const saved = await setWebhook(ctx.db, req.params.appId, url, ctx.now());
       res.json({ url: saved.webhookUrl, secret: saved.webhookSecret });
     })
   );
@@ -213,7 +222,7 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
     '/apps/:appId/webhook/rotate-secret',
     asyncHandler(async (req, res) => {
       await member(req.params.appId, user(res).id);
-      res.json({ secret: await rotateWebhookSecret(ctx.db, req.params.appId) });
+      res.json({ secret: await rotateWebhookSecret(ctx.db, req.params.appId, ctx.now()) });
     })
   );
 
@@ -238,9 +247,10 @@ export function portalRoutes(ctx: AppContext, auth: ReturnType<typeof createAuth
   router.put(
     '/apps/:appId/quiz-banks/:bankId',
     asyncHandler(async (req, res) => {
-      await member(req.params.appId, user(res).id);
+      const u = user(res);
+      await member(req.params.appId, u.id);
       const body = parse(quizBankBody, req.body);
-      res.json(await saveQuizBank(ctx.db, req.params.appId, req.params.bankId, body, ctx.now()));
+      res.json(await saveQuizBank(ctx.db, req.params.appId, req.params.bankId, body, ctx.now(), u.id));
     })
   );
 

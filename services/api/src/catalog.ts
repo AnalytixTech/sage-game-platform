@@ -4,7 +4,7 @@ import { quizMasterRules } from '@sagegames/game-quiz-master';
 import { sudokuRules } from '@sagegames/game-sudoku';
 import { wordRushRules } from '@sagegames/game-word-rush';
 import { wordSearchRules } from '@sagegames/game-word-search';
-import { Queryable } from './db/db';
+import { Db, json, onConflictUpdate } from './db/db';
 
 export interface CatalogEntry {
   game: Omit<Game, 'id'>;
@@ -96,31 +96,22 @@ export function rulesFor(gameId: string): AnyGameRules | null {
 export const ALL_GAME_IDS = CATALOG.map((entry) => entry.rules.gameId);
 
 /** Upsert the code-defined catalog into the games table. */
-export async function syncCatalog(q: Queryable): Promise<void> {
+export async function syncCatalog(q: Db, now: Date = new Date()): Promise<void> {
   for (const { rules, game } of CATALOG) {
-    await q.query(
-      `INSERT INTO games (id, slug, name, description, version, category, status, delivery_model, thumbnail, supported_platforms, rules_version, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
-       ON CONFLICT (id) DO UPDATE SET
-         slug = EXCLUDED.slug, name = EXCLUDED.name, description = EXCLUDED.description,
-         version = EXCLUDED.version, category = EXCLUDED.category, status = EXCLUDED.status,
-         delivery_model = EXCLUDED.delivery_model, thumbnail = EXCLUDED.thumbnail,
-         supported_platforms = EXCLUDED.supported_platforms, rules_version = EXCLUDED.rules_version,
-         updated_at = now()`,
-      [
-        rules.gameId,
-        game.slug,
-        game.name,
-        game.description ?? null,
-        game.version,
-        game.category,
-        game.status,
-        game.deliveryModel,
-        game.thumbnail ?? null,
-        game.supportedPlatforms,
-        rules.rulesVersion,
-      ]
-    );
+    const values = {
+      slug: game.slug,
+      name: game.name,
+      description: game.description ?? null,
+      version: game.version,
+      category: game.category,
+      status: game.status,
+      delivery_model: game.deliveryModel,
+      thumbnail: game.thumbnail ?? null,
+      supported_platforms: json(game.supportedPlatforms),
+      rules_version: rules.rulesVersion,
+      updated_at: now,
+    };
+    await onConflictUpdate(q, q.insertInto('sagegames_games').values({ id: rules.gameId, ...values }), ['id'], values).execute();
   }
 }
 

@@ -6,12 +6,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { randomId } from '../auth/keys';
-import { one } from '../db/db';
+import { json } from '../db/db';
 import { bearerToken, createAuth, SessionRow } from '../http/auth';
 import { AppContext, HostAuth } from '../http/context';
 import { asyncHandler, HttpError, parse } from '../http/errors';
 import { leaderboard, playerStats } from '../services/leaderboards';
-import { createSession, startSession } from '../services/sessions';
+import { createSession, loadSession, startSession } from '../services/sessions';
 import { catalogHandlers } from './catalogHandlers';
 
 export function v1Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): Router {
@@ -75,10 +75,12 @@ export function v1Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
           err ? next(err) : res.json(toV1(res.locals.session, false))
         );
       }
-      const s = await one<SessionRow>(ctx.db, 'SELECT * FROM game_sessions WHERE id = $1 AND tenant_id = $2', [
-        req.params.sessionId,
-        host.tenantId,
-      ]);
+      const s = await ctx.db
+        .selectFrom('sagegames_game_sessions')
+        .selectAll()
+        .where('id', '=', req.params.sessionId)
+        .where('tenant_id', '=', host.tenantId)
+        .executeTakeFirst();
       if (!s) return next(new HttpError(404, 'Session not found', 'session_not_found'));
       res.json(toV1(s, true));
     })
@@ -89,20 +91,21 @@ export function v1Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
     auth.requireSession(),
     asyncHandler(async (_req, res) => {
       await startSession(ctx, res.locals.session);
-      const s = await one<SessionRow>(ctx.db, 'SELECT * FROM game_sessions WHERE id = $1', [res.locals.session.id]);
-      res.json(toV1(s as SessionRow, false));
+      res.json(toV1(await loadSession(ctx.db, res.locals.session.id), false));
     })
   );
 
   const transition = (from: SessionRow['status'], to: SessionRow['status']) =>
     asyncHandler(async (_req, res) => {
       const s: SessionRow = res.locals.session;
-      const [row] = await ctx.db.query<SessionRow>(
-        'UPDATE game_sessions SET status = $3 WHERE id = $1 AND status = $2 RETURNING *',
-        [s.id, from, to]
-      );
-      if (!row) throw new HttpError(409, `Cannot move session from '${s.status}' to '${to}'`, 'invalid_status');
-      res.json(toV1(row, false));
+      const moved = await ctx.db
+        .updateTable('sagegames_game_sessions')
+        .set({ status: to })
+        .where('id', '=', s.id)
+        .where('status', '=', from)
+        .executeTakeFirst();
+      if (Number(moved.numUpdatedRows) === 0) throw new HttpError(409, `Cannot move session from '${s.status}' to '${to}'`, 'invalid_status');
+      res.json(toV1(await loadSession(ctx.db, s.id), false));
     });
 
   router.post('/sessions/:sessionId/pause', auth.requireSession(), transition('active', 'paused'));
@@ -126,34 +129,35 @@ export function v1Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
         throw new HttpError(422, 'duration exceeds the time since the session started', 'duration_exceeds_elapsed');
       }
 
-      await ctx.db.tx(async (q) => {
-        const [row] = await q.query(
-          `UPDATE game_sessions SET status = 'completed', completed_at = $2
-            WHERE id = $1 AND status IN ('active', 'paused') RETURNING id`,
-          [s.id, now]
-        );
-        if (!row) throw new HttpError(409, `Session cannot be completed from status '${s.status}'`, 'invalid_status');
-        await q.query(
-          `INSERT INTO game_results
-             (id, session_id, tenant_id, game_id, external_user_id, display_name, context_id, status, score,
-              duration_ms, result, flags, is_valid, is_test, rules_version, completed_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'unverified', $8, $9, $10, '["unverified_v1"]', FALSE, $11, $12, $13)`,
-          [
-            randomId('res'),
-            s.id,
-            s.tenant_id,
-            s.game_id,
-            s.external_user_id,
-            s.display_name,
-            s.context_id,
-            Math.min(Math.floor(body.score), 100_000),
-            Math.floor(body.duration * 1000),
-            JSON.stringify(body.data ?? {}),
-            s.is_test,
-            s.rules_version,
-            now,
-          ]
-        );
+      await ctx.db.transaction().execute(async (q) => {
+        const completed = await q
+          .updateTable('sagegames_game_sessions')
+          .set({ status: 'completed', completed_at: now })
+          .where('id', '=', s.id)
+          .where('status', 'in', ['active', 'paused'])
+          .executeTakeFirst();
+        if (Number(completed.numUpdatedRows) === 0) throw new HttpError(409, `Session cannot be completed from status '${s.status}'`, 'invalid_status');
+        await q
+          .insertInto('sagegames_game_results')
+          .values({
+            id: randomId('res'),
+            session_id: s.id,
+            tenant_id: s.tenant_id,
+            game_id: s.game_id,
+            external_user_id: s.external_user_id,
+            display_name: s.display_name,
+            context_id: s.context_id,
+            status: 'unverified',
+            score: Math.min(Math.floor(body.score), 100_000),
+            duration_ms: Math.floor(body.duration * 1000),
+            result: json(body.data ?? {}),
+            flags: json(['unverified_v1']),
+            is_valid: false,
+            is_test: s.is_test,
+            rules_version: s.rules_version,
+            completed_at: now,
+          })
+          .execute();
       });
 
       res.json({

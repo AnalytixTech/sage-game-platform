@@ -74,22 +74,18 @@ describe('SageGames API', () => {
     env = await createTestEnv();
   });
   afterEach(async () => {
-    await env.db.close(); // each test gets its own in-memory Postgres
+    await env.close(); // each test gets its own empty database
   });
 
   describe('developer portal', () => {
-    it('requires a Supabase session', async () => {
+    it('requires a portal session', async () => {
       expect((await env.api.get('/portal/api/me')).status).toBe(401);
       expect((await env.api.get('/portal/api/me').set(auth('not-a-jwt'))).status).toBe(401);
     });
 
-    it('serves public Supabase settings for the portal', async () => {
+    it('serves the public settings the portal needs (and nothing secret)', async () => {
       const res = await env.api.get('/portal/api/config');
-      expect(res.body).toEqual({
-        supabaseUrl: env.config.supabaseUrl,
-        supabaseAnonKey: env.config.supabaseAnonKey,
-        apiBaseUrl: env.config.publicBaseUrl,
-      });
+      expect(res.body).toEqual({ apiBaseUrl: env.config.publicBaseUrl });
     });
 
     it('creates apps and keys that are shown once and stored hashed', async () => {
@@ -104,7 +100,7 @@ describe('SageGames API', () => {
       const keys = await env.api.get(`/portal/api/apps/${appId}/keys`).set(auth(dev.token));
       expect(keys.body).toHaveLength(1);
       expect(JSON.stringify(keys.body)).not.toContain(key.split('_')[3]);
-      const [row] = await env.db.query<{ key_hash: string }>('SELECT key_hash FROM api_keys WHERE id = $1', [keyId]);
+      const row = await env.db.selectFrom('sagegames_api_keys').select('key_hash').where('id', '=', keyId).executeTakeFirstOrThrow();
       expect(row.key_hash).not.toContain(key.split('_')[3]);
     });
 
@@ -460,7 +456,7 @@ describe('SageGames API', () => {
       const shell = await api.get('/portal/');
       expect(shell.status).toBe(200);
       expect(shell.text).toContain('<div id="root">');
-      expect(shell.headers['content-security-policy']).toContain(env.config.supabaseUrl);
+      expect(shell.headers['content-security-policy']).toContain("connect-src 'self'");
       expect((await api.get('/portal/apps/abc')).text).toContain('<div id="root">');
       expect((await api.get('/')).headers.location).toBe('/portal/');
 

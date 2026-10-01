@@ -1,13 +1,16 @@
 {
   "name": "@sagegames/api-service",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "SageGames platform API: sessions, server-side replay, leaderboards and the developer portal",
+  "description": "SageGames platform API: sessions, server-side replay, leaderboards, battles and the developer portal",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "claim-tenant": "node dist/scripts/claim-tenant.js"
+    "db:migrate": "node dist/scripts/migrate.js",
+    "create-user": "node dist/scripts/create-user.js",
+    "claim-tenant": "node dist/scripts/claim-tenant.js",
+    "import": "node dist/scripts/import.js"
   },
   "dependencies": {
     "@sagegames/engine": "2.3.0",
@@ -22,7 +25,8 @@
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
     "jose": "^6.2.12",
-    "nodemailer": "^10.0.10",
+    "kysely": "^0.29.6",
+    "mysql2": "^3.24.4",
     "pg": "^8.23.0",
     "ws": "^8.21.3",
     "zod": "^4.6.5"
@@ -30,10 +34,12 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@types/express": "^4.17.21",
-    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
     "@types/ws": "^8.18.1",
     "supertest": "^7.3.0"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

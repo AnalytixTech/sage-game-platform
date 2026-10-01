@@ -1,5 +1,5 @@
-// Screenshots the developer portal with a mocked API and a fake signed-in session (no Supabase, no keys).
-//   npm run build -w services/portal && npx vite preview --config services/portal/vite.config.ts --port 4174 &
+// Screenshots the developer portal with a mocked API and a fake signed-in session (no database, no keys).
+//   npm run build -w services/portal && (cd services/portal && npx vite preview --port 4174 &)
 //   node tools/portal-preview/shoot.mjs <outDir>
 import { chromium } from 'playwright';
 import fs from 'fs';
@@ -34,10 +34,12 @@ const GAMES = [
   ['game_word_001', 'Word Rush', 'Make words from a letter grid against the clock.'],
 ].map(([id, name, description]) => ({ id, name, description, category: 'puzzle' }));
 
+const USER = { id: 'u1', email: 'dev@japabudz.com' };
+
 function mock(url) {
   const path = new URL(url).pathname.replace(/^\/portal\/api/, '');
-  if (path === '/config') return { supabaseUrl: 'https://mock.supabase.co', supabaseAnonKey: 'anon', apiBaseUrl: 'https://api.sagegames.dev' };
-  if (path === '/me') return { user: { id: 'u1', email: 'dev@japabudz.com' }, apps: [APP, { ...APP, id: 'app_campus02', name: 'Campus Quiz Night', gameIds: ['game_quiz_001'] }] };
+  if (path === '/config') return { apiBaseUrl: 'https://api.sagegames.dev' };
+  if (path === '/me') return { user: USER, apps: [APP, { ...APP, id: 'app_campus02', name: 'Campus Quiz Night', gameIds: ['game_quiz_001'] }] };
   if (/^\/apps\/[^/]+$/.test(path)) return { ...APP, keys: KEYS };
   if (path.endsWith('/usage')) return { days: 30, daily: DAYS };
   if (path.endsWith('/results')) return RESULTS;
@@ -51,18 +53,16 @@ const browser = await chromium.launch();
 const errors = [];
 
 async function session(page, signedIn = true) {
-  await page.route('**/portal/api/**', (r) => r.fulfill({ json: mock(r.request().url()) }));
+  await page.route('**/portal/api/**', (r) => {
+    // The refresh cookie is "valid" when signed in: the portal restores the session from it.
+    if (r.request().url().endsWith('/auth/refresh')) {
+      return signedIn
+        ? r.fulfill({ json: { accessToken: 'preview', expiresIn: 900, user: USER } })
+        : r.fulfill({ status: 401, json: { error: 'Please sign in again', code: 'unauthorized' } });
+    }
+    return r.fulfill({ json: mock(r.request().url()) });
+  });
   await page.route('**/v2/games', (r) => r.fulfill({ json: GAMES }));
-  await page.route('https://mock.supabase.co/**', (r) => r.fulfill({ json: {} }));
-  if (signedIn) {
-    await page.addInitScript(() => {
-      const exp = Math.floor(Date.now() / 1000) + 3600;
-      localStorage.setItem(
-        'sb-mock-auth-token',
-        JSON.stringify({ access_token: 'preview', refresh_token: 'preview', token_type: 'bearer', expires_in: 3600, expires_at: exp, user: { id: 'u1', aud: 'authenticated', email: 'dev@japabudz.com', role: 'authenticated' } })
-      );
-    });
-  }
   page.on('pageerror', (e) => errors.push(e.message));
 }
 
@@ -80,6 +80,7 @@ async function shoot(name, path, { width = 1280, height = 860, signedIn = true, 
 const views = process.argv.slice(3);
 const all = {
   auth: () => shoot('auth', '/', { signedIn: false }),
+  account: () => shoot('account', '/account', { height: 1000 }),
   apps: () => shoot('apps', '/'),
   overview: () => shoot('overview', `/apps/${APP.id}/overview`),
   keys: () => shoot('keys', `/apps/${APP.id}/keys`),

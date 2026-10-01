@@ -2,9 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import express, { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
+import { dialectOf } from './db/db';
+import { pendingMigrations } from './db/migrate';
 import { BootstrapKey, createAuth } from './http/auth';
 import { AppContext } from './http/context';
-import { errorMiddleware, HttpError } from './http/errors';
+import { asyncHandler, errorMiddleware, HttpError } from './http/errors';
 import { requestLog } from './observability/requestLog';
 import { MatchHub, RealtimeOptions, DEFAULT_REALTIME } from './realtime/MatchRoom';
 import { matchRoutes } from './routes/matches';
@@ -47,7 +49,7 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          connectSrc: ["'self'", ctx.config.supabaseUrl],
+          connectSrc: ["'self'"],
           imgSrc: ["'self'", 'data:', 'https:'],
           styleSrc: ["'self'", "'unsafe-inline'"],
           scriptSrc: ["'self'"],
@@ -59,14 +61,18 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
   app.use(requestLog(ctx.logger.child({ component: 'http' })));
   app.use(express.json({ limit: '256kb' }));
 
+  // Health: the database answers and every migration is applied.
   app.get(
     '/healthz',
-    (_req, res, next) => {
-      ctx.db
-        .query('SELECT 1')
-        .then(() => res.json({ ok: true }))
-        .catch(next);
-    }
+    asyncHandler(async (_req, res) => {
+      const pending = await pendingMigrations(ctx.db);
+      res.status(pending.length ? 503 : 200).json({
+        ok: pending.length === 0,
+        database: dialectOf(ctx.db),
+        migrations: pending.length ? 'pending' : 'current',
+        ...(pending.length ? { pending } : {}),
+      });
+    })
   );
 
   app.use('/v1', cors, v1Routes(ctx, auth));

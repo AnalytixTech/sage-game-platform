@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { z } from 'zod';
-import { one } from '../db/db';
 import { createAuth, SessionRow } from '../http/auth';
 import { AppContext, HostAuth } from '../http/context';
 import { asyncHandler, HttpError, parse } from '../http/errors';
@@ -71,10 +70,12 @@ export function v2Routes(ctx: AppContext, auth: ReturnType<typeof createAuth>): 
     auth.requireHost,
     asyncHandler(async (req, res) => {
       const host: HostAuth = res.locals.host;
-      const s = await one<SessionRow>(ctx.db, 'SELECT * FROM game_sessions WHERE id = $1 AND tenant_id = $2', [
-        req.params.sessionId,
-        host.tenantId,
-      ]);
+      const s = await ctx.db
+        .selectFrom('sagegames_game_sessions')
+        .selectAll()
+        .where('id', '=', req.params.sessionId)
+        .where('tenant_id', '=', host.tenantId)
+        .executeTakeFirst();
       if (!s) throw new HttpError(404, 'Session not found', 'session_not_found');
       const result = s.status === 'completed' ? await loadCompletion(ctx.db, s.id) : null;
       res.json({

@@ -1,7 +1,9 @@
 import crypto from 'crypto';
 import { NextFunction, Request, Response } from 'express';
+import { Selectable } from 'kysely';
+import { verifyAccessToken } from '../auth/accounts';
 import { hashKeySecret, parseApiKey, safeEqualHex, sha256Hex } from '../auth/keys';
-import { one } from '../db/db';
+import { GameSessionsTable } from '../db/types';
 import { AppContext, HostAuth } from './context';
 import { asyncHandler, HttpError } from './errors';
 
@@ -43,20 +45,26 @@ export function createAuth(ctx: AppContext, bootstrapKeys: BootstrapKey[]) {
   async function resolveHostKey(key: string): Promise<HostAuth | null> {
     const parsed = parseApiKey(key);
     if (parsed) {
-      const row = await one<{ tenant_id: string; key_hash: string; mode: string }>(
-        ctx.db,
-        `SELECT k.tenant_id, k.key_hash, k.mode
-           FROM api_keys k JOIN tenants t ON t.id = k.tenant_id
-          WHERE k.id = $1 AND k.revoked_at IS NULL AND t.status = 'active'`,
-        [parsed.id]
-      );
+      const row = await ctx.db
+        .selectFrom('sagegames_api_keys as k')
+        .innerJoin('sagegames_tenants as t', 't.id', 'k.tenant_id')
+        .select(['k.tenant_id', 'k.key_hash', 'k.mode'])
+        .where('k.id', '=', parsed.id)
+        .where('k.revoked_at', 'is', null)
+        .where('t.status', '=', 'active')
+        .executeTakeFirst();
       if (!row || row.mode !== parsed.mode) return null;
       if (!safeEqualHex(row.key_hash, hashKeySecret(parsed.secret, ctx.config.apiKeyPepper))) return null;
 
       const now = Date.now();
       if ((recentlyTouched.get(parsed.id) ?? 0) < now - LAST_USED_WRITE_INTERVAL_MS) {
         recentlyTouched.set(parsed.id, now);
-        ctx.db.query('UPDATE api_keys SET last_used_at = now() WHERE id = $1', [parsed.id]).catch(() => undefined);
+        ctx.db
+          .updateTable('sagegames_api_keys')
+          .set({ last_used_at: ctx.now() })
+          .where('id', '=', parsed.id)
+          .execute()
+          .catch(() => undefined);
       }
       return { tenantId: row.tenant_id, isTest: parsed.mode === 'test', keyId: parsed.id };
     }
@@ -94,48 +102,34 @@ export function createAuth(ctx: AppContext, bootstrapKeys: BootstrapKey[]) {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const token = bearerToken(req);
       if (!token) throw new HttpError(401, 'Missing session token', 'unauthorized');
-      const session = await one<SessionRow>(ctx.db, 'SELECT * FROM game_sessions WHERE session_token_hash = $1', [
-        sha256Hex(token),
-      ]);
+      const session = await ctx.db
+        .selectFrom('sagegames_game_sessions')
+        .selectAll()
+        .where('session_token_hash', '=', sha256Hex(token))
+        .executeTakeFirst();
       if (!session || session.id !== req.params.sessionId) {
         throw new HttpError(401, 'Invalid session token', 'invalid_session_token');
       }
-      if (new Date(session.expires_at).getTime() + graceMs <= ctx.now().getTime()) {
+      if (session.expires_at.getTime() + graceMs <= ctx.now().getTime()) {
         throw new HttpError(401, 'Session token has expired', 'session_expired');
       }
       res.locals.session = session;
       next();
     });
 
-  /** Developer portal routes: require a Supabase Auth access token. */
+  /** The portal user for an access token (checks the account still exists and the token isn't revoked). */
+  const portalUserFor = (token: string) => verifyAccessToken(ctx, token);
+
+  /** Developer portal routes: require a portal access token. */
   const requirePortalUser = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const token = bearerToken(req);
-    const user = token ? await ctx.verifyPortalToken(token) : null;
+    const user = token ? await portalUserFor(token) : null;
     if (!user) throw new HttpError(401, 'Please sign in again', 'unauthorized');
     res.locals.user = user;
     next();
   });
 
-  return { resolveHostKey, requireHost, optionalHost, requireSession, requirePortalUser };
+  return { resolveHostKey, requireHost, optionalHost, requireSession, requirePortalUser, portalUserFor };
 }
 
-export interface SessionRow {
-  id: string;
-  tenant_id: string;
-  is_test: boolean;
-  external_user_id: string;
-  display_name: string | null;
-  context_id: string | null;
-  game_id: string;
-  status: 'created' | 'active' | 'paused' | 'completed' | 'expired';
-  seed: string;
-  rules_version: number;
-  resolved_config: Record<string, unknown>;
-  mode: 'solo' | 'match';
-  match_id: string | null;
-  metadata: Record<string, unknown>;
-  expires_at: Date;
-  started_at: Date | null;
-  completed_at: Date | null;
-  created_at: Date;
-}
+export type SessionRow = Selectable<GameSessionsTable>;

@@ -1,177 +1,209 @@
-# Deploying the SageGames platform
+# Self-hosting the SageGames platform
 
-The platform has two parts:
+The platform is one Node service: the game API (`/v1`, `/v2`), the battle WebSocket (`/v2/ws`), webhook delivery and the developer portal (`/portal`, with its own accounts). It needs a SQL database and, for account emails, a Brevo API key. Nothing else.
 
-| Part | Runs on | What it does |
+It runs anywhere a container or Node 22 runs. This guide covers:
+
+1. [Choosing a database](#1-choose-a-database)
+2. [Configuration](#2-configuration)
+3. [Railway, step by step](#3-railway-step-by-step)
+4. [Any host with Docker](#4-any-host-with-docker)
+5. [Email](#5-email)
+6. [The first account](#6-the-first-account)
+7. [Backups](#7-backups)
+8. [One instance per deployment](#8-one-instance-per-deployment)
+9. [Upgrades and migrations](#9-upgrades-and-migrations)
+
+Moving an existing 2.x deployment? Follow [Moving from the 2.x deployment](MOVING_TO_3.md).
+
+## 1. Choose a database
+
+`DATABASE_URL` picks the database by its scheme:
+
+| Database | `DATABASE_URL` | Good for |
 | --- | --- | --- |
-| **Database + portal accounts** | Supabase (Postgres + Auth) | Stores tenants, keys, sessions, results and leaderboards in the `sagegames` schema. Supabase Auth handles developer sign-up, email confirmation and password resets. |
-| **API + developer portal** | Render (Node web service) | Serves the game API (`/v1`, `/v2`), replays and verifies scores, sends webhooks, and serves the portal at `/portal`. |
+| **Postgres** 13+ | `postgres://user:password@host:5432/sagegames` | Most deployments: Railway Postgres, Neon, RDS, Cloud SQL, any managed or self-hosted Postgres |
+| **MySQL** 8 / **MariaDB** 10.6+ | `mysql://user:password@host:3306/sagegames` | Teams already running MySQL (PlanetScale-style hosts, RDS MySQL, self-hosted) |
+| **SQLite** | `sqlite:/app/data/sagegames.db` | One server and modest traffic: a single file, nothing else to run. Put it on a persistent volume. |
 
-Everything about the database is configured from this repo with the Supabase CLI (`npx supabase …`). The CLI is a dev dependency, so no global install is needed.
+All tables are named `sagegames_*`, so the platform can share a database with other apps. Connection poolers are fine, including transaction poolers (PgBouncer, Neon's pooled endpoint): nothing depends on per-connection settings.
 
----
+Everything is tested on every database. The full API suite runs on SQLite, Postgres, MySQL 8 and MariaDB in CI.
 
-## 1. Connect the repo to the Supabase project (once per machine)
+## 2. Configuration
 
-```bash
-npx supabase login                               # opens a browser to authorise the CLI
-npx supabase link --project-ref <project-ref>    # asks for the database password
-```
+| Variable | Required | Value |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | See above. |
+| `API_KEY_PEPPER` | in production | 32+ random characters. Mixed into API key hashes: **changing it invalidates every API key**, so store it safely. |
+| `AUTH_JWT_SECRET` | in production | 32+ random characters. Signs portal sessions; changing it signs everyone out of the portal. |
+| `PUBLIC_BASE_URL` | yes | Where the service is reachable, e.g. `https://sagegames.japabudz.com`. Email links point here. |
+| `BREVO_API_KEY`, `EMAIL_FROM` | for sign-up | Account emails (see [Email](#5-email)). Without them, development logs the links instead. |
+| `NODE_ENV` | | `production` on servers. |
+| `PORT` | | Default `4000`; most hosts set it. |
+| `DATABASE_SSL` | | `auto` (default: TLS for public database hosts, not for `localhost` or private network names such as `postgres.railway.internal`), `true` or `false`. |
+| `DATABASE_POOL_SIZE` | | Connections to keep open (Postgres/MySQL). Default `10`; lower it on small plans. |
+| `SAGE_TENANT_KEYS` | | Bootstrap keys for apps that existed before the portal (see [KEYS_SETUP.md](KEYS_SETUP.md)). |
+| `SENTRY_DSN` | | Report unexpected errors to Sentry. Without it, errors are only logged. |
+| `RELEASE` | | The deployed version in logs and Sentry. Defaults to `RAILWAY_GIT_COMMIT_SHA` or `RENDER_GIT_COMMIT`. |
+| `LOG_LEVEL`, `LOG_FORMAT` | | `info` and `json` in production by default. |
 
-The project ref is the id in the dashboard URL: `https://supabase.com/dashboard/project/<project-ref>`.
-
-## 2. Apply the database schema
-
-```bash
-npm run db:push          # = npx supabase db push
-```
-
-This applies every file in [`supabase/migrations/`](../supabase/migrations) that the project hasn't run yet. All tables are created in a dedicated `sagegames` schema:
-
-- It won't clash with tables other apps keep in `public` in the same project.
-- Supabase's Data API doesn't expose it, and Row Level Security is enabled with no policies, so the anon key cannot read anything. Only the platform API, connecting as the database owner, uses these tables.
-
-To change the schema later, add a migration and push it:
-
-```bash
-npm run db:new -- add_something     # creates supabase/migrations/<timestamp>_add_something.sql
-# edit the file, run the tests (they apply every migration), then:
-npm run db:push
-```
-
-Never edit a migration that has already been pushed.
-
-## 3. Configure Supabase Auth for the portal
-
-The portal's auth settings live in [`supabase/config.toml`](../supabase/config.toml) under `[auth]`:
-
-- email confirmation required before sign-in
-- passwords of at least 10 characters, with upper and lower case letters and a digit
-- redirect URLs for the portal (`site_url` and `additional_redirect_urls`)
-
-Push them with:
+Generate the secrets with:
 
 ```bash
-npx supabase config push
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-> **If the Supabase project is shared with another app**, `config push` overwrites that app's auth settings too (site URL, redirect URLs, sign-up rules). In that case, don't push. Instead, set these by hand in the dashboard under **Authentication → URL Configuration / Providers → Email**:
->
-> - add `https://<your-render-url>/portal/` to the redirect URLs
-> - turn on **Confirm email**
+[`services/api/.env.example`](../services/api/.env.example) lists them all for local runs.
 
-### Email delivery (Brevo API, from sageanalytix.cloud)
+## 3. Railway, step by step
 
-Portal emails are sent by the **`send-email` Edge Function** ([supabase/functions/send-email](../supabase/functions/send-email)) through **Brevo's transactional email API**, as `SageGames <no-reply@sageanalytix.cloud>`. That covers sign-up confirmation, password reset, email change, the reauthentication code, and notices such as "password changed". SMTP isn't used.
+The repo includes a [`Dockerfile`](../Dockerfile) and a [`railway.json`](../railway.json): Railway builds the image, runs the migrations before each deploy, health-checks `/healthz` and restarts the service if it crashes.
 
-How it works:
-
-1. Supabase Auth calls the function for every auth email, signing the request with a shared secret (`[auth.hook.send_email]` in `config.toml`).
-2. The function verifies the signature, renders the SageGames template ([templates.ts](../supabase/functions/send-email/templates.ts)) and posts it to `https://api.brevo.com/v3/smtp/email`.
-
-The function runs on Supabase, so sign-up emails don't depend on the Render API being awake.
-
-One-time setup:
-
-1. **Authenticate the domain in Brevo.** Go to **Senders, Domains & Dedicated IPs → Domains → Add a domain → `sageanalytix.cloud`**. Brevo lists DNS records to add at your DNS provider:
-   - a `brevo-code` TXT record (ownership)
-   - DKIM records (`brevo1._domainkey`, `brevo2._domainkey`)
-   - a DMARC TXT record on `_dmarc` if you don't have one; `v=DMARC1; p=none; rua=mailto:postmaster@sageanalytix.cloud` is a safe start
-
-   Wait until Brevo shows the domain as **Authenticated**. Without this, mail lands in spam or is rejected.
-2. **Add the sender** `no-reply@sageanalytix.cloud` under **Senders**.
-3. **Create an API key** under **SMTP & API → API keys** (it starts with `xkeysib-`). Put it in `supabase/.env`. Git ignores that file, and it already holds a generated `SEND_EMAIL_HOOK_SECRET`:
-
-   ```env
-   SEND_EMAIL_HOOK_SECRET=v1,whsec_…   # generated; the function and the Auth hook must share it
-   BREVO_API_KEY=xkeysib-…
-   ```
-
-4. **Deploy, in this order,** so the function exists before Auth starts calling it:
+1. **Create a project** at railway.com → **New project → Deploy from GitHub repo** → pick the repository. Railway finds `railway.json` and builds with the Dockerfile.
+2. **Add a database.** In the project, **New → Database → PostgreSQL** (or MySQL). Railway creates it next to the service.
+3. **Set the variables** on the service (**Variables** tab):
+   - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}` (a reference to the database's private URL; for MySQL, `${{MySQL.MYSQL_URL}}`)
+   - `NODE_ENV` = `production`
+   - `API_KEY_PEPPER`, `AUTH_JWT_SECRET`: two different random values
+   - `PUBLIC_BASE_URL` = your domain, e.g. `https://sagegames.japabudz.com`
+   - `BREVO_API_KEY`, `EMAIL_FROM` (see [Email](#5-email))
+4. **Deploy.** Each deploy runs `node services/api/dist/scripts/migrate.js` first (the pre-deploy command), then starts the server. The deploy logs show `Applied 0001_init (postgres).` the first time, then `listening` with `database: "postgres"`.
+5. **Add the domain.** **Settings → Networking → Custom Domain** → `sagegames.japabudz.com`. Railway shows a CNAME record. Add it at your DNS provider (for `sagegames.japabudz.com`: a `CNAME` named `sagegames` pointing to the target Railway gives you). Railway issues the TLS certificate once DNS resolves.
+6. **Check it:**
 
    ```bash
-   npx supabase secrets set --env-file supabase/.env
-   npx supabase functions deploy send-email --use-api --no-verify-jwt
-   set -a; . supabase/.env; set +a      # makes SEND_EMAIL_HOOK_SECRET available to config push
-   npx supabase config diff              # should show only the send_email hook and email settings
-   npx supabase config push
+   curl https://sagegames.japabudz.com/healthz    # {"ok":true,"database":"postgres","migrations":"current"}
+   curl https://sagegames.japabudz.com/v2/games   # the five games
    ```
 
-5. **Test it:** sign up at `/portal` with a real inbox. The email should arrive from `no-reply@sageanalytix.cloud`.
-   - If it doesn't arrive, check **Supabase → Edge Functions → send-email → Logs**.
-   - For delivery status, check **Brevo → Transactional → Logs**.
+   Then open `https://sagegames.japabudz.com/portal/`, sign up and confirm the email (or [create the first account](#6-the-first-account) without email).
 
-**Changing an email:** edit `templates.ts`, run `npm test`, then run `npx supabase functions deploy send-email --use-api --no-verify-jwt`.
+**SQLite on Railway:** add a volume to the service mounted at `/app/data` and set `DATABASE_URL=sqlite:/app/data/sagegames.db`. Volumes aren't attached during the pre-deploy step, so remove the pre-deploy command and start with `node services/api/dist/server.js --migrate` instead (the Dockerfile's default command).
 
-**Rotating the Brevo key:** update `BREVO_API_KEY` in `supabase/.env` and run `npx supabase secrets set --env-file supabase/.env`. No redeploy is needed.
+**Keep one replica.** `railway.json` sets `numReplicas: 1`. Don't scale the service horizontally (see [One instance per deployment](#8-one-instance-per-deployment)). Give it more CPU and memory instead.
 
-**Rotating the hook secret:** put a new `v1,whsec_<base64>` value in the file, then run both `secrets set` and `config push`.
+**Proxies and WebSockets.** Battles use a WebSocket on `/v2/ws` through Railway's proxy, with nothing to configure. The server pings every connection every 25 seconds, well inside the proxy's idle timeout, so quiet lobbies stay open. It also keeps HTTP keep-alive connections open for 65 seconds, longer than the proxy does.
 
-Brevo's free plan sends 300 emails a day, far more than the portal needs. Supabase's own rate limit is 60 auth emails an hour (`[auth.rate_limit] email_sent`).
+## 4. Any host with Docker
 
-## 4. Deploy the API on Render
+```bash
+docker build -t sagegames .
 
-Create a **Web Service** from the GitHub repo:
+# SQLite on a volume: the simplest install
+docker run -d --name sagegames -p 4000:4000 -v sagegames-data:/app/data \
+  -e NODE_ENV=production \
+  -e DATABASE_URL=sqlite:/app/data/sagegames.db \
+  -e API_KEY_PEPPER=<random> -e AUTH_JWT_SECRET=<random> \
+  -e PUBLIC_BASE_URL=https://games.example.com \
+  -e BREVO_API_KEY=xkeysib-… -e EMAIL_FROM="SageGames <no-reply@example.com>" \
+  sagegames
+```
 
-- **Build command:** `npm install --include=dev --legacy-peer-deps && npm run build`
-- **Start command:** `node services/api/dist/server.js`
-- **Health check path:** `/healthz`
+The image:
 
-Environment variables (see [`services/api/.env.example`](../services/api/.env.example)):
+- runs as an unprivileged user
+- applies pending migrations on start (`--migrate`, under a lock)
+- health-checks `/healthz`
+- keeps SQLite data in `/app/data`
 
-| Variable | Value |
+For Postgres or MySQL, pass that `DATABASE_URL` instead and drop the volume.
+
+Put a TLS-terminating proxy in front (Caddy, nginx, a load balancer, or your host's), forwarding WebSocket upgrades on `/v2/ws`. The service trusts one proxy hop for `X-Forwarded-For` and `X-Forwarded-Proto`. Proxy idle timeouts of 60 seconds or more are fine.
+
+Without Docker: Node 22.13+ (SQLite support is built into Node from there), then
+
+```bash
+npm ci --include=dev --legacy-peer-deps && npm run build
+node services/api/dist/server.js --migrate
+```
+
+Render works the same way: a Docker web service from the repo, with the health check path `/healthz` and one instance.
+
+## 5. Email
+
+The portal sends account emails itself: sign-up confirmation, password reset, email change and "password changed" notices. They go through **Brevo's transactional API**.
+
+1. **Authenticate your sending domain** in Brevo: **Senders, Domains & Dedicated IPs → Domains → Add a domain**. Add the records Brevo lists at your DNS provider:
+   - the `brevo-code` TXT record
+   - the DKIM records
+   - a DMARC record if you have none: `v=DMARC1; p=none` is a safe start
+
+   Wait until Brevo shows the domain as **Authenticated**, or mail lands in spam.
+2. **Add the sender** (e.g. `no-reply@japabudz.com`) under **Senders**.
+3. **Create an API key** under **SMTP & API → API keys** (it starts with `xkeysib-`).
+4. Set `BREVO_API_KEY` and `EMAIL_FROM="SageGames <no-reply@japabudz.com>"` on the service.
+5. Sign up at `/portal` with a real inbox. Delivery status is under **Brevo → Transactional → Logs**.
+
+Without a key, development and test runs log each email's links instead of sending them. Production answers "We couldn't send the email" until a key is set.
+
+## 6. The first account
+
+Anyone can sign up at `/portal`. To create the first owner without email (a fresh install, or before Brevo is set up), run this where the service runs (Railway: the service's shell, or `railway run`):
+
+```bash
+node services/api/dist/scripts/create-user.js owner@example.com 'A-strong-passw0rd'
+```
+
+To give an account an app created from `SAGE_TENANT_KEYS`:
+
+```bash
+node services/api/dist/scripts/claim-tenant.js tenant_campus_app owner@example.com
+```
+
+## 7. Backups
+
+| Database | Back up with |
 | --- | --- |
-| `NODE_ENV` | `production` |
-| `DATABASE_URL` | Supabase → **Connect** → **Session pooler** connection string (port **5432**). Don't use the transaction pooler on port 6543: the API sets the schema per connection. |
-| `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
-| `SUPABASE_ANON_KEY` | The project's publishable (anon) key. It is safe to expose; the portal uses it in the browser. |
-| `API_KEY_PEPPER` | 32+ random characters (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). **Changing it invalidates every API key**, so store it somewhere safe. |
-| `PUBLIC_BASE_URL` | The Render URL, e.g. `https://sage-game-platform.onrender.com` |
-| `SAGE_TENANT_KEYS` | Optional. Bootstrap keys for tenants that existed before the portal (see [KEYS_SETUP.md](KEYS_SETUP.md)). |
-| `SENTRY_DSN` | Optional. A Sentry project's DSN, to be told about unexpected errors. Without it, errors are only logged. Render's `RENDER_GIT_COMMIT` is attached as the release. |
-| `LOG_LEVEL` | Optional. `info` (default), `debug`, `warn`, `error` or `silent`. |
-| `LOG_FORMAT` | Optional. `json` (default in production) or `pretty`. |
+| Postgres | Your host's automated backups (Railway, Neon and RDS all have them), plus `pg_dump --format=custom "$DATABASE_URL" > sagegames.dump` for an off-site copy. Restore with `pg_restore --clean --dbname "$DATABASE_URL" sagegames.dump`. |
+| MySQL / MariaDB | Host backups, plus `mysqldump --single-transaction --routines sagegames > sagegames.sql`. Restore with `mysql sagegames < sagegames.sql`. |
+| SQLite | `sqlite3 /app/data/sagegames.db ".backup '/app/data/backup.db'"` while the service runs (a consistent copy), then copy `backup.db` off the volume. Or snapshot the volume. Restore by replacing the file while the service is stopped. |
 
-When the API starts, it:
+Keep `API_KEY_PEPPER` with the backups. A restored database needs the same pepper for its API keys to work.
 
-1. checks that the schema exists (and exits with "run `npx supabase db push`" if it doesn't)
-2. syncs the game catalog into the database
-3. creates any tenants named in `SAGE_TENANT_KEYS`
-4. starts the webhook worker
-5. logs `listening` with `errorReporting: "sentry"` or `"off"`, so you can confirm the Sentry setup from Render's logs
+## 8. One instance per deployment
 
-The free Render plan sleeps after 15 minutes idle, and the first request afterwards takes 30–60 seconds. That's fine for trying the platform out. Use a paid plan once real players depend on it, and certainly for online battles.
+Battle rooms (lobby, countdown, live race) live in the memory of the process that runs them, so a deployment must run **exactly one** API process. Two processes would split the players of one match between them.
 
-## 5. Check the deployment
+- Railway: `numReplicas: 1` (in `railway.json`). Render: one instance. Kubernetes: `replicas: 1` with a `Recreate` rollout.
+- Each process records a heartbeat in the database. If it sees another live one, it logs `another API instance is using this database`. That's expected for a few seconds during a rolling deploy; a lasting warning means a second replica is running.
+- On restart, races that were running are marked `aborted` (their live state was in memory). Lobbies are picked up again from the database.
 
-```bash
-curl https://<render-url>/healthz            # {"ok":true}: API and database reachable
-curl https://<render-url>/v2/games           # the five games
-open https://<render-url>/portal/            # sign up, confirm the email, create an app and a key
-```
+Scale up rather than out: one Node process handles thousands of concurrent players. Broadcasts go through a `MatchBus` interface (in memory today), so a Redis-backed bus can spread battles across instances later without changing game code.
 
-Then create a session with the new key:
+## 9. Upgrades and migrations
 
-```bash
-curl -X POST https://<render-url>/v2/sessions \
-  -H "Authorization: Bearer sk_live_…" -H "Content-Type: application/json" \
-  -d '{"gameId":"game_memory_001","externalUserId":"test_user"}'
-```
+Schema changes ship as migrations inside the API (`services/api/src/db/migrations/`). Each runs once per database and is recorded in `sagegames_migrations`. A lock (an advisory lock on Postgres, `GET_LOCK` on MySQL, the single writer on SQLite) means two deploys never migrate at once.
+
+- **Railway:** applied by the pre-deploy command on every deploy.
+- **Docker:** applied on start (`--migrate`).
+- **By hand:** `npm run db:migrate`, or `node services/api/dist/scripts/migrate.js`.
+
+Without `--migrate`, the server refuses to start while migrations are pending and says how to apply them. `/healthz` answers `503` with `"migrations": "pending"` in that state.
 
 ## Running locally
 
 ```bash
-cp services/api/.env.example services/api/.env    # fill in the values
+cp services/api/.env.example services/api/.env    # SQLite by default: nothing else to install
 npm run build
-node --env-file=services/api/.env services/api/dist/server.js
-# Portal with hot reload (proxies API calls to :4000):
+node --env-file=services/api/.env services/api/dist/server.js --migrate
+# The portal with hot reload (proxies API calls to :4000):
 npm run dev -w services/portal                    # http://localhost:5173/portal/
 ```
 
+Without `BREVO_API_KEY`, the server logs the links from sign-up and reset emails. Open them to confirm an account.
+
 ## Tests
 
-`npm test` runs every test offline. The API tests run against **PGlite**, a real Postgres compiled to WebAssembly, with the same migrations from `supabase/migrations`. So SQL and schema problems show up in tests and in CI without a database server.
+`npm test` runs offline. The API suite runs twice: on SQLite and on PGlite (Postgres compiled to WebAssembly). Point it at real servers to run them too:
+
+```bash
+TEST_MYSQL_URL=mysql://root:pw@127.0.0.1:3306/mysql \
+TEST_POSTGRES_URL=postgres://postgres:pw@127.0.0.1:5432/postgres npm test
+```
+
+Each test gets a fresh database on that server. `npm run test:flow -- sqlite:./.e2e/sagegames.db` drives the whole flow (sign-up to verified game) against the production server in a real browser.
 
 ## Publishing the SDK packages
 
-Push a version tag (for example `git tag v2.3.0 && git push --tags`). The **Publish NPM Packages** workflow then builds, tests and publishes every public package whose version isn't on npm yet. The services and examples are private and never published.
+Push a version tag (for example `git tag v2.3.0 && git push --tags`). The **Publish NPM Packages** workflow then builds, tests and publishes every public package whose version isn't on npm yet. The API, portal and examples are private and never published.

@@ -2,14 +2,17 @@ import http from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
 import { ServerMessage } from '@sagegames/types';
 import { sha256Hex } from '../auth/keys';
-import { one } from '../db/db';
-import { SessionRow } from '../http/auth';
 import { AppContext } from '../http/context';
 import { MatchHub, parseClientMessage, RoomSocket } from './MatchRoom';
 
 export const WS_PATH = '/v2/ws';
 const AUTH_TIMEOUT_MS = 5000;
-const HEARTBEAT_MS = 15_000;
+/**
+ * Ping every 25 seconds: well inside the idle timeouts of Railway's and Render's proxies (and most
+ * load balancers, typically 60 seconds or more), so quiet lobbies stay connected. A socket that
+ * misses a whole interval without a pong is closed.
+ */
+export const HEARTBEAT_MS = 25_000;
 /** More than this many messages in one second closes the connection. */
 const MAX_MESSAGES_PER_SECOND = 40;
 
@@ -39,7 +42,9 @@ export function attachRealtime(server: http.Server, ctx: AppContext, hub: MatchH
   }, HEARTBEAT_MS);
   heartbeat.unref();
 
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
+    // Behind a proxy, the client's address is in X-Forwarded-For (first entry).
+    const clientIp = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress;
     alive.set(ws, true);
     ws.on('pong', () => alive.set(ws, true));
 
@@ -72,9 +77,13 @@ export function attachRealtime(server: http.Server, ctx: AppContext, hub: MatchH
       if (!seat) {
         if (msg.type !== 'auth' || authenticating) return fail('unauthenticated', 'Send { type: "auth", token } first');
         authenticating = true;
-        const session = await one<SessionRow>(ctx.db, 'SELECT * FROM game_sessions WHERE session_token_hash = $1', [sha256Hex(msg.token)]);
+        const session = await ctx.db
+          .selectFrom('sagegames_game_sessions')
+          .selectAll()
+          .where('session_token_hash', '=', sha256Hex(msg.token))
+          .executeTakeFirst();
         if (!session || session.mode !== 'match' || !session.match_id) return fail('invalid_token', 'Invalid match token');
-        if (new Date(session.expires_at).getTime() <= ctx.now().getTime()) return fail('token_expired', 'This match seat has expired');
+        if (session.expires_at.getTime() <= ctx.now().getTime()) return fail('token_expired', 'This match seat has expired');
         const room = await hub.room(session.match_id);
         if (!room) return fail('match_closed', 'This match is no longer running', 4004);
         clearTimeout(authTimer);
@@ -94,7 +103,7 @@ export function attachRealtime(server: http.Server, ctx: AppContext, hub: MatchH
       room?.detach(seat.sessionId, socket);
     });
 
-    ws.on('error', (err) => ctx.logger.warn('websocket error', { component: 'ws', err }));
+    ws.on('error', (err) => ctx.logger.warn('websocket error', { component: 'ws', err, clientIp }));
   });
 
   return {
