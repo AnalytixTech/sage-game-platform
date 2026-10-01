@@ -79,7 +79,10 @@ jobs:
         run: |
           set -e
           docker run --rm --network proxy curlimages/curl:8.10.1 -fsS http://sagegames-app:4000/healthz
-          test -z "$(docker compose port sagegames-app 4000 2>/dev/null || true)"
+          # No host port bindings at all (`docker compose port` prints "invalid IP:0" here instead of nothing).
+          bindings="$(docker inspect "$(docker compose ps -q sagegames-app)" --format '{{json .HostConfig.PortBindings}}')"
+          echo "port bindings: $bindings"
+          test "$bindings" = "{}"
 
       - name: Hardening
         run: |
