@@ -40,7 +40,7 @@ describe('API reference (docs/openapi.yaml)', () => {
       env = await createTestEnv();
     });
     afterAll(async () => {
-      await env.db.close();
+      await env.close();
     });
 
     it('every documented route is served (not the catch-all 404)', async () => {

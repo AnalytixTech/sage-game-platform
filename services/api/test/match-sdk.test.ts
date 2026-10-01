@@ -51,7 +51,7 @@ describe('SDK MatchController against the real server', () => {
     await realtime.close();
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
-    await env.db.close();
+    await env.close();
   });
 
   const controller = (seat: MatchSeat) => {
@@ -85,10 +85,7 @@ describe('SDK MatchController against the real server', () => {
 
   /** The deck, from the database: the app itself never learns the faces in advance. */
   const pairs = async (seat: MatchSeat) => {
-    const [row] = await env.db.query<{ seed: string; resolved_config: Record<string, unknown> }>(
-      'SELECT seed, resolved_config FROM matches WHERE id = $1',
-      [seat.matchId]
-    );
+    const row = await env.db.selectFrom('sagegames_matches').select(['seed', 'resolved_config']).where('id', '=', seat.matchId).executeTakeFirstOrThrow();
     const state = memoryMatchRules.init(row.seed, memoryMatchRules.parseConfig(row.resolved_config));
     const map = new Map<string, number[]>();
     state.cards.forEach((card, i) => map.set(card.face, [...(map.get(card.face) ?? []), i]));

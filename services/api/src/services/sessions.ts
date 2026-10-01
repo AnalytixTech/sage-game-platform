@@ -2,7 +2,8 @@ import crypto from 'crypto';
 import { ConfigError, replay, ReplayRejected } from '@sagegames/engine';
 import { generateSessionToken, randomId, sha256Hex } from '../auth/keys';
 import { rulesFor } from '../catalog';
-import { one, Queryable } from '../db/db';
+import { sql } from 'kysely';
+import { Db, forUpdate, greatest, json, onConflictUpdate } from '../db/db';
 import { SessionRow } from '../http/auth';
 import { AppContext, HostAuth } from '../http/context';
 import { HttpError } from '../http/errors';
@@ -34,14 +35,12 @@ const QUIZ_GAME_ID = 'game_quiz_001';
 
 /** Check the app may use the game and validate its config (tenant defaults + request config). */
 export async function resolveGame(ctx: AppContext, host: HostAuth, gameIdOrSlug: string, config: Record<string, unknown> | undefined) {
-  const game = await one<{ id: string; status: string; rules_version: number; allowed_configurations: Record<string, unknown> | null; is_enabled: boolean | null }>(
-    ctx.db,
-    `SELECT g.id, g.status, g.rules_version, a.allowed_configurations, a.is_enabled
-       FROM games g
-       LEFT JOIN tenant_game_access a ON a.game_id = g.id AND a.tenant_id = $1
-      WHERE g.id = $2 OR g.slug = $2`,
-    [host.tenantId, gameIdOrSlug]
-  );
+  const game = await ctx.db
+    .selectFrom('sagegames_games as g')
+    .leftJoin('sagegames_tenant_game_access as a', (join) => join.onRef('a.game_id', '=', 'g.id').on('a.tenant_id', '=', host.tenantId))
+    .select(['g.id', 'g.status', 'g.rules_version', 'a.allowed_configurations', 'a.is_enabled'])
+    .where((eb) => eb.or([eb('g.id', '=', gameIdOrSlug), eb('g.slug', '=', gameIdOrSlug)]))
+    .executeTakeFirst();
   const rules = game ? rulesFor(game.id) : null;
   if (!game || !rules || game.status !== 'published') {
     throw new HttpError(404, `Game '${gameIdOrSlug}' not found`, 'game_not_found');
@@ -52,11 +51,12 @@ export async function resolveGame(ctx: AppContext, host: HostAuth, gameIdOrSlug:
 
   const merged: Record<string, unknown> = { ...(game.allowed_configurations ?? {}), ...(config ?? {}) };
   if (game.id === QUIZ_GAME_ID && typeof merged.bankId === 'string') {
-    const bank = await one<{ questions: unknown }>(
-      ctx.db,
-      'SELECT questions FROM quiz_banks WHERE tenant_id = $1 AND bank_id = $2',
-      [host.tenantId, merged.bankId]
-    );
+    const bank = await ctx.db
+      .selectFrom('sagegames_quiz_banks')
+      .select('questions')
+      .where('tenant_id', '=', host.tenantId)
+      .where('bank_id', '=', merged.bankId)
+      .executeTakeFirst();
     if (!bank) throw new HttpError(400, `Quiz bank '${merged.bankId}' not found`, 'quiz_bank_not_found');
     merged.questions = bank.questions;
     delete merged.bankId;
@@ -79,28 +79,25 @@ export async function createSession(ctx: AppContext, host: HostAuth, input: Crea
   const { token, hash } = generateSessionToken();
   const expiresAt = new Date(ctx.now().getTime() + SESSION_TTL_MS);
 
-  await ctx.db.query(
-    `INSERT INTO game_sessions
-       (id, tenant_id, is_test, external_user_id, display_name, context_id, game_id, session_token_hash,
-        seed, rules_version, resolved_config, metadata, expires_at, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-    [
-      sessionId,
-      host.tenantId,
-      host.isTest,
-      input.externalUserId,
-      input.displayName ?? null,
-      input.contextId ?? null,
-      game.id,
-      hash,
-      crypto.randomBytes(16).toString('hex'),
-      rules.rulesVersion,
-      JSON.stringify(resolved),
-      JSON.stringify(input.metadata ?? {}),
-      expiresAt,
-      ctx.now(),
-    ]
-  );
+  await ctx.db
+    .insertInto('sagegames_game_sessions')
+    .values({
+      id: sessionId,
+      tenant_id: host.tenantId,
+      is_test: host.isTest,
+      external_user_id: input.externalUserId,
+      display_name: input.displayName ?? null,
+      context_id: input.contextId ?? null,
+      game_id: game.id,
+      session_token_hash: hash,
+      seed: crypto.randomBytes(16).toString('hex'),
+      rules_version: rules.rulesVersion,
+      resolved_config: json(resolved),
+      metadata: json(input.metadata ?? {}),
+      expires_at: expiresAt,
+      created_at: ctx.now(),
+    })
+    .execute();
 
   return { sessionId, sessionToken: token, gameId: game.id, expiresAt: expiresAt.toISOString(), rulesVersion: rules.rulesVersion };
 }
@@ -135,12 +132,14 @@ export async function startSession(ctx: AppContext, s: SessionRow, clientRulesVe
   if (s.status !== 'created') {
     throw new HttpError(409, `Session cannot be started from status '${s.status}'`, 'invalid_status');
   }
-  const [row] = await ctx.db.query<SessionRow>(
-    `UPDATE game_sessions SET status = 'active', started_at = $2 WHERE id = $1 AND status = 'created' RETURNING *`,
-    [s.id, ctx.now()]
-  );
-  if (!row) throw new HttpError(409, 'Session was started concurrently', 'invalid_status');
-  return playPayload(ctx, row);
+  const started = await ctx.db
+    .updateTable('sagegames_game_sessions')
+    .set({ status: 'active', started_at: ctx.now() })
+    .where('id', '=', s.id)
+    .where('status', '=', 'created')
+    .executeTakeFirst();
+  if (Number(started.numUpdatedRows) === 0) throw new HttpError(409, 'Session was started concurrently', 'invalid_status');
+  return playPayload(ctx, await loadSession(ctx.db, s.id));
 }
 
 export interface CompletionResult {
@@ -157,20 +156,9 @@ export interface CompletionResult {
   completedAt: string;
 }
 
-interface ResultRow {
-  session_id: string;
-  game_id: string;
-  status: 'verified' | 'rejected' | 'unverified';
-  is_valid: boolean;
-  score: number;
-  duration_ms: number;
-  result: unknown;
-  flags: string[];
-  reject_code: string | null;
-  completed_at: Date;
-  tenant_id: string;
-  external_user_id: string;
-  context_id: string | null;
+/** A session by id (it must exist). */
+export async function loadSession(q: Db, sessionId: string): Promise<SessionRow> {
+  return q.selectFrom('sagegames_game_sessions').selectAll().where('id', '=', sessionId).executeTakeFirstOrThrow();
 }
 
 /**
@@ -178,13 +166,13 @@ interface ResultRow {
  * the same log returns the stored result; a different log after completion is refused.
  */
 export async function completeSession(ctx: AppContext, sessionId: string, log: unknown): Promise<CompletionResult> {
-  const rules = await ctx.db.tx(async (q) => {
-    const s = await one<SessionRow>(q, 'SELECT * FROM game_sessions WHERE id = $1 FOR UPDATE', [sessionId]);
+  const rules = await ctx.db.transaction().execute(async (q) => {
+    const s = await forUpdate(q, q.selectFrom('sagegames_game_sessions').selectAll().where('id', '=', sessionId)).executeTakeFirst();
     if (!s) throw new HttpError(404, 'Session not found', 'session_not_found');
     const logHash = sha256Hex(JSON.stringify(log ?? null));
 
     if (s.status === 'completed') {
-      const stored = await one<{ log_sha256: string }>(q, 'SELECT log_sha256 FROM session_logs WHERE session_id = $1', [s.id]);
+      const stored = await q.selectFrom('sagegames_session_logs').select('log_sha256').where('session_id', '=', s.id).executeTakeFirst();
       if (stored?.log_sha256 === logHash) return { replayed: false as const, s };
       throw new HttpError(409, 'This session has already been completed', 'already_completed');
     }
@@ -235,54 +223,61 @@ export function judge(s: SessionRow, log: unknown, serverElapsedMs?: number): Ve
  * Store a session's result (solo or match) inside the caller's transaction: completes the
  * session, keeps the log, writes the result and stats, and queues the session.completed webhook.
  */
-export async function recordResult(q: Queryable, s: SessionRow, log: unknown, verdict: Verdict, now: Date): Promise<void> {
+export async function recordResult(q: Db, s: SessionRow, log: unknown, verdict: Verdict, now: Date): Promise<void> {
   const { status, score, durationMs, result, flags, rejectCode } = verdict;
   const isValid = status === 'verified' && flags.length === 0 && !s.is_test;
 
-  await q.query(`UPDATE game_sessions SET status = 'completed', completed_at = $2 WHERE id = $1`, [s.id, now]);
-  await q.query(`INSERT INTO session_logs (session_id, log, log_sha256) VALUES ($1, $2, $3)`, [
-    s.id,
-    JSON.stringify(log ?? null),
-    sha256Hex(JSON.stringify(log ?? null)),
-  ]);
-  await q.query(
-    `INSERT INTO game_results
-       (id, session_id, tenant_id, game_id, external_user_id, display_name, context_id, status, reject_code,
-        score, duration_ms, result, flags, is_valid, is_test, rules_version, completed_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-    [
-      randomId('res'),
-      s.id,
-      s.tenant_id,
-      s.game_id,
-      s.external_user_id,
-      s.display_name,
-      s.context_id,
+  await q.updateTable('sagegames_game_sessions').set({ status: 'completed', completed_at: now }).where('id', '=', s.id).execute();
+  await q
+    .insertInto('sagegames_session_logs')
+    .values({ session_id: s.id, log: json(log), log_sha256: sha256Hex(JSON.stringify(log ?? null)), received_at: now })
+    .execute();
+  await q
+    .insertInto('sagegames_game_results')
+    .values({
+      id: randomId('res'),
+      session_id: s.id,
+      tenant_id: s.tenant_id,
+      game_id: s.game_id,
+      external_user_id: s.external_user_id,
+      display_name: s.display_name,
+      context_id: s.context_id,
       status,
-      rejectCode,
+      reject_code: rejectCode,
       score,
-      durationMs,
-      JSON.stringify(result),
-      JSON.stringify(flags),
-      isValid,
-      s.is_test,
-      s.rules_version,
-      now,
-    ]
-  );
+      duration_ms: durationMs,
+      result: json(result),
+      flags: json(flags),
+      is_valid: isValid,
+      is_test: s.is_test,
+      rules_version: s.rules_version,
+      completed_at: now,
+    })
+    .execute();
 
   if (isValid) {
-    await q.query(
-      `INSERT INTO player_stats (tenant_id, external_user_id, game_id, games_completed, total_score, highest_score, total_play_time_ms, updated_at)
-       VALUES ($1, $2, $3, 1, $4::bigint, $5::int, $6::bigint, now())
-       ON CONFLICT (tenant_id, external_user_id, game_id) DO UPDATE SET
-         games_completed = player_stats.games_completed + 1,
-         total_score = player_stats.total_score + EXCLUDED.total_score,
-         highest_score = GREATEST(player_stats.highest_score, EXCLUDED.highest_score),
-         total_play_time_ms = player_stats.total_play_time_ms + EXCLUDED.total_play_time_ms,
-         updated_at = now()`,
-      [s.tenant_id, s.external_user_id, s.game_id, score, score, durationMs]
-    );
+    const stat = (column: string) => sql.ref<number>(`sagegames_player_stats.${column}`);
+    await onConflictUpdate(
+      q,
+      q.insertInto('sagegames_player_stats').values({
+        tenant_id: s.tenant_id,
+        external_user_id: s.external_user_id,
+        game_id: s.game_id,
+        games_completed: 1,
+        total_score: score,
+        highest_score: score,
+        total_play_time_ms: durationMs,
+        updated_at: now,
+      }),
+      ['tenant_id', 'external_user_id', 'game_id'],
+      {
+        games_completed: sql`${stat('games_completed')} + 1`,
+        total_score: sql`${stat('total_score')} + ${score}`,
+        highest_score: greatest(q, stat('highest_score'), sql.val(score)),
+        total_play_time_ms: sql`${stat('total_play_time_ms')} + ${durationMs}`,
+        updated_at: now,
+      }
+    ).execute();
   }
 
   if (!s.is_test) {
@@ -305,8 +300,8 @@ export async function recordResult(q: Queryable, s: SessionRow, log: unknown, ve
   }
 }
 
-export async function loadCompletion(q: Queryable, sessionId: string): Promise<CompletionResult> {
-  const r = await one<ResultRow>(q, 'SELECT * FROM game_results WHERE session_id = $1', [sessionId]);
+export async function loadCompletion(q: Db, sessionId: string): Promise<CompletionResult> {
+  const r = await q.selectFrom('sagegames_game_results').selectAll().where('session_id', '=', sessionId).executeTakeFirst();
   if (!r) throw new HttpError(404, 'Result not found', 'result_not_found');
   const rank = r.is_valid
     ? await rankFor(q, { tenantId: r.tenant_id, gameId: r.game_id, contextId: r.context_id, externalUserId: r.external_user_id })
@@ -322,6 +317,6 @@ export async function loadCompletion(q: Queryable, sessionId: string): Promise<C
     flags: r.flags,
     rejectCode: r.reject_code,
     rank,
-    completedAt: new Date(r.completed_at).toISOString(),
+    completedAt: r.completed_at.toISOString(),
   };
 }

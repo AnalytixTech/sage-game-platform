@@ -6,7 +6,45 @@
     "composite": true,
     "types": [
       "node"
-    ]
+    ],
+    "paths": {
+      "@sagegames/types": [
+        "packages/types/src/index.ts"
+      ],
+      "@sagegames/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@sagegames/react": [
+        "packages/react/src/index.ts"
+      ],
+      "@sagegames/react-native": [
+        "packages/react-native/src/index.ts"
+      ],
+      "@sagegames/game-quiz-master": [
+        "games/quiz-master/src/index.ts"
+      ],
+      "@sagegames/game-word-rush": [
+        "games/word-rush/src/index.ts"
+      ],
+      "@sagegames/game-memory-match": [
+        "games/memory-match/src/index.ts"
+      ],
+      "@sagegames/game-word-search": [
+        "games/word-search/src/index.ts"
+      ],
+      "@sagegames/game-sudoku": [
+        "games/sudoku/src/index.ts"
+      ],
+      "@sagegames/engine": [
+        "packages/engine/src/index.ts"
+      ],
+      "@sagegames/react-headless": [
+        "packages/react-headless/src/index.ts"
+      ],
+      "kysely/migration": [
+        "node_modules/kysely/dist/migration/index.d.ts"
+      ]
+    }
   },
   "references": [
     {

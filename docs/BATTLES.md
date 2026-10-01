@@ -105,7 +105,7 @@ The `match.finished` webhook carries `{ matchId, gameId, contextId, standings, f
 ## Limits
 
 - Battles run on a single API instance and live in memory while they're played. A server restart **aborts** any battle in progress (status `aborted`); lobbies survive.
-- On Render, use a paid plan: a sleeping free instance drops every open connection.
+- Use an always-on plan: a host that sleeps when idle drops every open connection. Run one API instance per deployment (rooms live in memory; see [Self-hosting](DEPLOYMENT.md#8-one-instance-per-deployment)).
 - The WebSocket accepts at most 40 messages a second per player and 16 KB per message. The seat token goes in the first message, never in the URL.
 
 ## Hidden information

@@ -62,8 +62,38 @@ interface Slot {
   lastView: string;
 }
 
+/**
+ * Where a room's broadcasts go. Rooms publish every message for all players to the bus and receive
+ * them back to deliver to the sockets connected to this process. In memory today (one API instance
+ * per deployment); a Redis pub/sub bus can implement this later to spread players across instances
+ * without changing game code.
+ */
+export interface MatchBus {
+  publish(matchId: string, message: ServerMessage): void;
+  subscribe(matchId: string, deliver: (message: ServerMessage) => void): () => void;
+}
+
+export class InMemoryMatchBus implements MatchBus {
+  private readonly subscribers = new Map<string, Set<(message: ServerMessage) => void>>();
+
+  publish(matchId: string, message: ServerMessage): void {
+    for (const deliver of this.subscribers.get(matchId) ?? []) deliver(message);
+  }
+
+  subscribe(matchId: string, deliver: (message: ServerMessage) => void): () => void {
+    const set = this.subscribers.get(matchId) ?? new Set();
+    set.add(deliver);
+    this.subscribers.set(matchId, set);
+    return () => {
+      set.delete(deliver);
+      if (set.size === 0) this.subscribers.delete(matchId);
+    };
+  }
+}
+
 interface RoomDeps {
   db: Db;
+  bus: MatchBus;
   now: () => number;
   options: RealtimeOptions;
   logger: Logger;
@@ -112,6 +142,7 @@ export class MatchRoom {
   private lastProgress = '';
   private finalizing = false;
   private standings: MatchStanding[] | null;
+  private readonly unsubscribe: () => void;
 
   constructor(
     private readonly match: MatchRow,
@@ -122,9 +153,12 @@ export class MatchRoom {
     this.standings = match.standings;
     this.rules = rulesFor(match.game_id)!;
     players.forEach((p) => this.addSlot(p));
+    this.unsubscribe = deps.bus.subscribe(match.id, (message) => {
+      for (const slot of this.slots.values()) slot.socket?.send(message);
+    });
 
     if (this.status === 'lobby') {
-      const wait = Math.max(0, new Date(match.lobby_expires_at).getTime() - deps.now());
+      const wait = Math.max(0, match.lobby_expires_at.getTime() - deps.now());
       this.lobbyTimer = setTimeout(() => this.onLobbyExpired(), wait);
     }
   }
@@ -459,7 +493,7 @@ export class MatchRoom {
   }
 
   private broadcast(message: ServerMessage) {
-    for (const s of this.slots.values()) s.socket?.send(message);
+    this.deps.bus.publish(this.match.id, message);
   }
 
   private broadcastMatch() {
@@ -495,6 +529,7 @@ export class MatchRoom {
 
   /** Close every connection and forget the room. */
   dispose(reason?: { code: string; message: string }) {
+    this.unsubscribe();
     [this.lobbyTimer, this.countdownTimer].forEach((t) => t && clearTimeout(t));
     if (this.ticker) clearInterval(this.ticker);
     for (const s of this.slots.values()) {
@@ -515,7 +550,8 @@ export class MatchHub {
     private readonly db: Db,
     private readonly now: () => number,
     private readonly logger: Logger,
-    private readonly options: RealtimeOptions = DEFAULT_REALTIME
+    private readonly options: RealtimeOptions = DEFAULT_REALTIME,
+    private readonly bus: MatchBus = new InMemoryMatchBus()
   ) {}
 
   room(matchId: string): Promise<MatchRoom | null> {
@@ -541,6 +577,7 @@ export class MatchHub {
     }
     return new MatchRoom(match, await loadPlayers(this.db, matchId), {
       db: this.db,
+      bus: this.bus,
       now: this.now,
       options: this.options,
       logger: this.logger,

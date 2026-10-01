@@ -1,18 +1,11 @@
--- SageGames platform schema.
---
--- Everything lives in the `sagegames` schema so it can share a Supabase project without clashing
--- with other tables, and so Supabase's Data API (which exposes `public`) cannot reach it. Only the
--- platform API, connecting as the database owner, reads and writes these tables. RLS is enabled
--- with no policies as a second layer: anon/authenticated roles get nothing even if exposed later.
---
--- Portal accounts are Supabase Auth users (auth.users); tenant_members links them to tenants.
-
+-- The 2.x platform schema (Postgres, `sagegames` schema), for testing the export to 3.0.
+-- Portal accounts lived in a separate auth.users table.
+CREATE SCHEMA auth;
+CREATE TABLE auth.users (id UUID PRIMARY KEY, email TEXT, email_confirmed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now());
 CREATE SCHEMA IF NOT EXISTS sagegames;
-REVOKE ALL ON SCHEMA sagegames FROM PUBLIC;
-REVOKE ALL ON SCHEMA sagegames FROM anon, authenticated;
+
 SET search_path TO sagegames;
 
--- Tenants are host apps (e.g. Japabudz)
 CREATE TABLE tenants (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -32,7 +25,6 @@ CREATE TABLE tenant_members (
 );
 CREATE INDEX tenant_members_user ON tenant_members (user_id);
 
--- Host API keys: sk_<mode>_<id>_<secret>. Only an HMAC of the secret is stored.
 CREATE TABLE api_keys (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -46,7 +38,6 @@ CREATE TABLE api_keys (
 );
 CREATE INDEX api_keys_tenant ON api_keys (tenant_id);
 
--- Game catalog (synced from code when the API starts)
 CREATE TABLE games (
   id TEXT PRIMARY KEY,
   slug TEXT UNIQUE NOT NULL,
@@ -66,7 +57,6 @@ CREATE TABLE tenant_game_access (
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
   is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-  -- Default config merged under each session's config (e.g. the tenant's word list)
   allowed_configurations JSONB NOT NULL DEFAULT '{}'::jsonb,
   PRIMARY KEY (tenant_id, game_id)
 );
@@ -103,7 +93,6 @@ CREATE TABLE session_logs (
   received_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- One result per session. Only status='verified' AND is_valid rows reach leaderboards.
 CREATE TABLE game_results (
   id TEXT PRIMARY KEY,
   session_id TEXT UNIQUE NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
@@ -139,7 +128,6 @@ CREATE TABLE player_stats (
   PRIMARY KEY (tenant_id, external_user_id, game_id)
 );
 
--- Per-tenant quiz question banks, referenced by config.bankId
 CREATE TABLE quiz_banks (
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   bank_id TEXT NOT NULL,
@@ -149,7 +137,6 @@ CREATE TABLE quiz_banks (
   PRIMARY KEY (tenant_id, bank_id)
 );
 
--- Webhook outbox, drained by the dispatcher
 CREATE TABLE webhook_deliveries (
   id BIGSERIAL PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -164,15 +151,45 @@ CREATE TABLE webhook_deliveries (
 );
 CREATE INDEX webhook_deliveries_due ON webhook_deliveries (next_attempt_at) WHERE status = 'pending';
 
--- Defence in depth: RLS on, no policies.
-ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tenant_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
-ALTER TABLE games ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tenant_game_access ENABLE ROW LEVEL SECURITY;
-ALTER TABLE game_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE session_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE game_results ENABLE ROW LEVEL SECURITY;
-ALTER TABLE player_stats ENABLE ROW LEVEL SECURITY;
-ALTER TABLE quiz_banks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE webhook_deliveries ENABLE ROW LEVEL SECURITY;
+SET search_path TO sagegames;
+
+CREATE TABLE matches (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  game_id TEXT NOT NULL REFERENCES games(id),
+  is_test BOOLEAN NOT NULL DEFAULT FALSE,
+  context_id TEXT,
+  seed TEXT NOT NULL,
+  rules_version INT NOT NULL,
+  resolved_config JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'lobby'
+    CHECK (status IN ('lobby', 'countdown', 'in_progress', 'finished', 'cancelled', 'aborted')),
+  min_players INT NOT NULL DEFAULT 2,
+  max_players INT NOT NULL DEFAULT 8,
+  allow_join BOOLEAN NOT NULL DEFAULT FALSE,
+  lobby_expires_at TIMESTAMPTZ NOT NULL,
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  standings JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX matches_tenant_created ON matches (tenant_id, created_at);
+CREATE INDEX matches_active ON matches (status) WHERE status IN ('lobby', 'countdown', 'in_progress');
+
+CREATE TABLE match_players (
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  external_user_id TEXT NOT NULL,
+  session_id TEXT NOT NULL UNIQUE REFERENCES game_sessions(id) ON DELETE CASCADE,
+  display_name TEXT,
+  status TEXT NOT NULL DEFAULT 'invited'
+    CHECK (status IN ('invited', 'ready', 'playing', 'finished', 'forfeited', 'absent')),
+  rank INT,
+  score INT,
+  finished_ms INT,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (match_id, external_user_id)
+);
+
+ALTER TABLE game_sessions
+  ADD CONSTRAINT game_sessions_match_fk FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE;
+

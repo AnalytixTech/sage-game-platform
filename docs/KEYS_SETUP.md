@@ -61,14 +61,14 @@ Each request carries a `Sage-Signature: t=<unix>,v1=<hex>` header. `v1` is the H
 
 A tenant that existed before the portal (such as `tenant_campus_app`) can keep working through a bootstrap key while it moves to portal keys:
 
-1. On Render, set `SAGE_TENANT_KEYS=tenant_campus_app:<long random secret>`. Generate the secret with:
+1. On the API service (Railway, Docker…), set `SAGE_TENANT_KEYS=tenant_campus_app:<long random secret>`. Generate the secret with:
 
    ```bash
    node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
    ```
 
    It must be at least 24 characters. When the API starts, it creates the tenant if it's missing.
-2. Have the tenant's owner sign up in the portal, then attach the tenant to their account:
+2. Have the tenant's owner sign up in the portal (or create their account with `create-user`, see [Self-hosting](DEPLOYMENT.md#6-the-first-account)), then attach the tenant to their account:
 
    ```bash
    DATABASE_URL=… node services/api/dist/scripts/claim-tenant.js tenant_campus_app owner@example.com

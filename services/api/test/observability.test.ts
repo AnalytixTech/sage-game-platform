@@ -42,8 +42,8 @@ describe('logger', () => {
   });
 
   it('removes passwords from connection strings', () => {
-    expect(redact('connect failed: postgresql://postgres.ref:S3cr3t!pw@aws-1.pooler.supabase.com:5432/postgres')).toBe(
-      'connect failed: postgresql://postgres.ref:[redacted]@aws-1.pooler.supabase.com:5432/postgres'
+    expect(redact('connect failed: postgresql://postgres.ref:S3cr3t!pw@db.example.com:5432/postgres')).toBe(
+      'connect failed: postgresql://postgres.ref:[redacted]@db.example.com:5432/postgres'
     );
   });
 
@@ -66,7 +66,7 @@ describe('request logging', () => {
     env = await createTestEnv();
   });
   afterEach(async () => {
-    await env.db.close();
+    await env.close();
   });
 
   it('logs each request with an id, without query strings or credentials', async () => {
@@ -86,12 +86,15 @@ describe('request logging', () => {
   });
 
   it('logs unexpected errors with the request id and answers a plain 500', async () => {
-    const query = env.ctx.db.query;
-    env.ctx.db.query = async () => {
-      throw new Error('connection to server failed (password=hunter2, key sk_live_k9_leak)');
-    };
+    // A database that fails on first use.
+    const db = env.ctx.db;
+    env.ctx.db = new Proxy(db, {
+      get() {
+        throw new Error('connection to server failed (password=hunter2, key sk_live_k9_leak)');
+      },
+    });
     const res = await env.api.get('/healthz');
-    env.ctx.db.query = query;
+    env.ctx.db = db;
 
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Internal server error', code: 'internal' });
@@ -103,7 +106,7 @@ describe('request logging', () => {
 });
 
 describe('logging config', () => {
-  const base = { DATABASE_URL: 'postgresql://u:p@localhost:5432/db', SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'anon' };
+  const base = { DATABASE_URL: 'postgresql://u:p@localhost:5432/db' };
 
   it('treats empty variables as unset (SENTRY_DSN= in a .env file)', () => {
     const c = loadConfig({ ...base, SENTRY_DSN: '', LOG_LEVEL: '' });
@@ -112,7 +115,7 @@ describe('logging config', () => {
   });
 
   it('logs JSON in production and readable lines elsewhere, unless told otherwise', () => {
-    expect(loadConfig({ ...base, NODE_ENV: 'production', API_KEY_PEPPER: 'x'.repeat(32) }).logFormat).toBe('json');
+    expect(loadConfig({ ...base, NODE_ENV: 'production', API_KEY_PEPPER: 'x'.repeat(32), AUTH_JWT_SECRET: 'y'.repeat(32) }).logFormat).toBe('json');
     expect(loadConfig({ ...base }).logFormat).toBe('pretty');
     expect(loadConfig({ ...base, LOG_FORMAT: 'json' }).logFormat).toBe('json');
   });

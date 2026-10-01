@@ -1,4 +1,4 @@
-/** SageGames auth email templates (HTML with inline styles for email clients, plus plain text). */
+/** SageGames account email templates (HTML with inline styles for email clients, plus plain text). */
 
 export interface EmailContent {
   subject: string;
@@ -126,36 +126,6 @@ export function confirmEmailChange(currentEmail: string, newEmail: string, url: 
   });
 }
 
-export function invite(email: string, url: string): EmailContent {
-  return render({
-    subject: "You've been invited to SageGames",
-    title: "You're invited",
-    intro: `You've been invited to the SageGames developer portal as <strong>${escapeHtml(email)}</strong>. Accept to set up your account.`,
-    button: { label: 'Accept invitation', url },
-    footer: "If you weren't expecting this, you can ignore this email.",
-  });
-}
-
-export function magicLink(email: string, url: string): EmailContent {
-  return render({
-    subject: 'Your SageGames sign-in link',
-    title: 'Sign in to SageGames',
-    intro: `Use this link to sign in as <strong>${escapeHtml(email)}</strong>. It works once and expires soon.`,
-    button: { label: 'Sign in', url },
-    footer: "If you didn't try to sign in, you can ignore this email.",
-  });
-}
-
-export function reauthenticate(code: string): EmailContent {
-  return render({
-    subject: 'Your SageGames confirmation code',
-    title: 'Confirm it’s you',
-    intro: 'Enter this code to confirm the change to your account:',
-    code,
-    footer: "If you didn't request this, reset your password straight away.",
-  });
-}
-
 export function passwordChanged(email: string): EmailContent {
   return render({
     subject: 'Your SageGames password was changed',
@@ -171,5 +141,25 @@ export function genericNotice(email: string, action: string): EmailContent {
     title: 'Account activity',
     intro: `There was a change to your SageGames developer account <strong>${escapeHtml(email)}</strong> (${escapeHtml(action.replace(/_/g, ' '))}).`,
     footer: "If this wasn't you, reset your password from the sign-in page immediately.",
+  });
+}
+
+export function setPassword(email: string, url: string): EmailContent {
+  return render({
+    subject: 'Set a password for SageGames',
+    title: 'Set your password',
+    intro: `The SageGames developer portal has moved to its own sign-in. Choose a password for <strong>${escapeHtml(email)}</strong> to keep using your apps and keys. The link works once and expires in an hour.`,
+    button: { label: 'Set a password', url },
+    footer: "If you didn't try to sign in, you can ignore this email.",
+  });
+}
+
+export function accountExists(email: string, signInUrl: string): EmailContent {
+  return render({
+    subject: 'You already have a SageGames account',
+    title: 'You already have an account',
+    intro: `Someone tried to sign up for SageGames with <strong>${escapeHtml(email)}</strong>, which already has an account. Sign in instead, or reset your password if you've forgotten it.`,
+    button: { label: 'Sign in', url: signInUrl },
+    footer: "If this wasn't you, you can ignore this email.",
   });
 }

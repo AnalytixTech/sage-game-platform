@@ -1,5 +1,6 @@
+import { sql } from 'kysely';
 import { GamePlayerStats, Leaderboard, LeaderboardPeriod, PlayerStats } from '@sagegames/types';
-import { one, Queryable } from '../db/db';
+import { Db } from '../db/db';
 
 export interface BoardFilter {
   tenantId: string;
@@ -24,44 +25,57 @@ export function periodStart(period: LeaderboardPeriod | undefined, now: Date): D
   }
 }
 
-// Best valid score per player, then ranked. Ties share a rank; earlier achievers list first.
-const BEST_PER_PLAYER = `
-  SELECT DISTINCT ON (external_user_id) external_user_id, display_name, score, completed_at
-    FROM game_results
-   WHERE tenant_id = $1 AND game_id = $2 AND is_valid AND status = 'verified'
-     AND completed_at >= $3 AND ($4::text IS NULL OR context_id = $4)
-   ORDER BY external_user_id, score DESC, completed_at ASC`;
+/**
+ * Best valid score per player (earliest achievement wins a tie with yourself). Window functions,
+ * so it runs the same on Postgres, MySQL 8+ and SQLite 3.25+.
+ */
+function bestPerPlayer(f: { tenantId: string; gameId: string; since: Date; contextId: string | null }) {
+  return sql`
+    select external_user_id, display_name, score, completed_at
+      from (
+        select external_user_id, display_name, score, completed_at,
+               row_number() over (partition by external_user_id order by score desc, completed_at asc) as best_rank
+          from ${sql.table('sagegames_game_results')}
+         where tenant_id = ${f.tenantId}
+           and game_id = ${f.gameId}
+           and is_valid = ${true}
+           and status = 'verified'
+           and completed_at >= ${f.since}
+           ${f.contextId !== null ? sql`and context_id = ${f.contextId}` : sql``}
+      ) per_player
+     where best_rank = 1`;
+}
+
+interface BoardRow {
+  external_user_id: string;
+  display_name: string | null;
+  score: number;
+  completed_at: Date;
+  rank: number;
+  total: number;
+}
 
 export async function leaderboard(
-  q: Queryable,
+  q: Db,
   filter: BoardFilter,
   page: { limit: number; offset: number },
   now: Date
 ): Promise<Leaderboard & { contextId?: string }> {
-  const rows = await q.query<{
-    external_user_id: string;
-    display_name: string | null;
-    score: number;
-    completed_at: Date;
-    rank: number;
-    total: number;
-  }>(
-    `WITH best AS (${BEST_PER_PLAYER})
-     SELECT *, (RANK() OVER (ORDER BY score DESC))::int AS rank, (COUNT(*) OVER ())::int AS total
-       FROM best
-      ORDER BY score DESC, completed_at ASC
-      LIMIT $5 OFFSET $6`,
-    [filter.tenantId, filter.gameId, periodStart(filter.period, now), filter.contextId ?? null, page.limit, page.offset]
-  );
+  const best = bestPerPlayer({ tenantId: filter.tenantId, gameId: filter.gameId, since: periodStart(filter.period, now), contextId: filter.contextId ?? null });
+  // Ties share a rank; earlier achievers list first.
+  const { rows } = await sql<BoardRow>`
+    with best as (${best})
+    select external_user_id, display_name, score, completed_at,
+           rank() over (order by score desc) as ${sql.id('rank')},
+           count(*) over () as total
+      from best
+     order by score desc, completed_at asc, external_user_id asc
+     limit ${page.limit} offset ${page.offset}`.execute(q);
 
-  let total = rows[0]?.total ?? 0;
+  let total = Number(rows[0]?.total ?? 0);
   if (rows.length === 0 && page.offset > 0) {
-    const count = await one<{ total: number }>(
-      q,
-      `WITH best AS (${BEST_PER_PLAYER}) SELECT COUNT(*)::int AS total FROM best`,
-      [filter.tenantId, filter.gameId, periodStart(filter.period, now), filter.contextId ?? null]
-    );
-    total = count?.total ?? 0;
+    const count = await sql<{ total: number }>`with best as (${best}) select count(*) as total from best`.execute(q);
+    total = Number(count.rows[0]?.total ?? 0);
   }
 
   return {
@@ -70,11 +84,11 @@ export async function leaderboard(
     period: filter.period ?? 'all_time',
     totalPlayers: total,
     entries: rows.map((r) => ({
-      rank: r.rank,
+      rank: Number(r.rank),
       externalUserId: r.external_user_id,
       username: r.display_name ?? undefined,
-      score: r.score,
-      achievedAt: new Date(r.completed_at).toISOString(),
+      score: Number(r.score),
+      achievedAt: r.completed_at.toISOString(),
       gameId: filter.gameId,
     })),
   };
@@ -82,55 +96,55 @@ export async function leaderboard(
 
 /** A player's all-time rank for a game (and context, if given), or null if unranked. */
 export async function rankFor(
-  q: Queryable,
+  q: Db,
   filter: { tenantId: string; gameId: string; contextId: string | null; externalUserId: string }
 ): Promise<number | null> {
-  const row = await one<{ rank: number }>(
-    q,
-    `WITH best AS (${BEST_PER_PLAYER}),
-          ranked AS (SELECT external_user_id, (RANK() OVER (ORDER BY score DESC))::int AS rank FROM best)
-     SELECT rank FROM ranked WHERE external_user_id = $5`,
-    [filter.tenantId, filter.gameId, new Date(0), filter.contextId, filter.externalUserId]
-  );
-  return row?.rank ?? null;
+  const best = bestPerPlayer({ tenantId: filter.tenantId, gameId: filter.gameId, since: new Date(0), contextId: filter.contextId });
+  const { rows } = await sql<{ player_rank: number }>`
+    with best as (${best}),
+         ranked as (select external_user_id, rank() over (order by score desc) as player_rank from best)
+    select player_rank from ranked where external_user_id = ${filter.externalUserId}`.execute(q);
+  return rows[0] ? Number(rows[0].player_rank) : null;
 }
 
-export async function playerStats(q: Queryable, tenantId: string, externalUserId: string): Promise<PlayerStats> {
-  const rows = await q.query<{
-    game_id: string;
-    games_completed: number;
-    total_score: string | number;
-    highest_score: number;
-    total_play_time_ms: string | number;
-  }>('SELECT * FROM player_stats WHERE tenant_id = $1 AND external_user_id = $2', [tenantId, externalUserId]);
+export async function playerStats(q: Db, tenantId: string, externalUserId: string): Promise<PlayerStats> {
+  const rows = await q
+    .selectFrom('sagegames_player_stats')
+    .selectAll()
+    .where('tenant_id', '=', tenantId)
+    .where('external_user_id', '=', externalUserId)
+    .execute();
 
-  const played = await one<{ n: number }>(
-    q,
-    `SELECT COUNT(*)::int AS n FROM game_sessions WHERE tenant_id = $1 AND external_user_id = $2 AND status <> 'created'`,
-    [tenantId, externalUserId]
-  );
+  const played = await q
+    .selectFrom('sagegames_game_sessions')
+    .select((eb) => eb.fn.countAll<number>().as('n'))
+    .where('tenant_id', '=', tenantId)
+    .where('external_user_id', '=', externalUserId)
+    .where('status', '<>', 'created')
+    .executeTakeFirst();
 
   const perGameStats: Record<string, GamePlayerStats> = {};
   let gamesCompleted = 0;
   let totalScore = 0;
   for (const r of rows) {
     const total = Number(r.total_score);
-    gamesCompleted += r.games_completed;
+    const completed = Number(r.games_completed);
+    gamesCompleted += completed;
     totalScore += total;
     perGameStats[r.game_id] = {
       gameId: r.game_id,
-      gamesPlayed: r.games_completed,
-      gamesCompleted: r.games_completed,
+      gamesPlayed: completed,
+      gamesCompleted: completed,
       totalScore: total,
-      highestScore: r.highest_score,
-      averageScore: r.games_completed > 0 ? total / r.games_completed : 0,
+      highestScore: Number(r.highest_score),
+      averageScore: completed > 0 ? total / completed : 0,
       totalPlayTimeSeconds: Math.round(Number(r.total_play_time_ms) / 1000),
     };
   }
 
   return {
     externalUserId,
-    gamesPlayed: played?.n ?? 0,
+    gamesPlayed: Number(played?.n ?? 0),
     gamesCompleted,
     totalScore,
     averageScore: gamesCompleted > 0 ? totalScore / gamesCompleted : 0,

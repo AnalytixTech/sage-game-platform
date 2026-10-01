@@ -1,5 +1,4 @@
 import { GameRow, toGame } from '../catalog';
-import { one } from '../db/db';
 import { AppContext, HostAuth } from '../http/context';
 import { asyncHandler, HttpError } from '../http/errors';
 
@@ -8,24 +7,33 @@ export function catalogHandlers(ctx: AppContext) {
   const list = asyncHandler(async (req, res) => {
     const host: HostAuth | null = res.locals.host ?? null;
     const category = typeof req.query.category === 'string' ? req.query.category : null;
-    const rows = await ctx.db.query<GameRow>(
-      `SELECT g.* FROM games g
-        WHERE g.status = 'published'
-          AND ($1::text IS NULL OR g.category = $1)
-          AND ($2::text IS NULL OR EXISTS (
-                SELECT 1 FROM tenant_game_access a WHERE a.tenant_id = $2 AND a.game_id = g.id AND a.is_enabled))
-        ORDER BY g.name`,
-      [category, host?.tenantId ?? null]
-    );
-    res.json(rows.map(toGame));
+    let query = ctx.db.selectFrom('sagegames_games as g').selectAll('g').where('g.status', '=', 'published');
+    if (category !== null) query = query.where('g.category', '=', category);
+    if (host) {
+      query = query.where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('sagegames_tenant_game_access as a')
+            .select('a.game_id')
+            .where('a.tenant_id', '=', host.tenantId)
+            .whereRef('a.game_id', '=', 'g.id')
+            .where('a.is_enabled', '=', true)
+        )
+      );
+    }
+    const rows = await query.orderBy('g.name').execute();
+    res.json(rows.map((r) => toGame(r as GameRow)));
   });
 
   const get = asyncHandler(async (req, res) => {
-    const row = await one<GameRow>(ctx.db, `SELECT * FROM games WHERE (id = $1 OR slug = $1) AND status = 'published'`, [
-      req.params.gameId,
-    ]);
+    const row = await ctx.db
+      .selectFrom('sagegames_games')
+      .selectAll()
+      .where((eb) => eb.or([eb('id', '=', req.params.gameId), eb('slug', '=', req.params.gameId)]))
+      .where('status', '=', 'published')
+      .executeTakeFirst();
     if (!row) throw new HttpError(404, 'Game not found', 'game_not_found');
-    res.json(toGame(row));
+    res.json(toGame(row as GameRow));
   });
 
   return { list, get };

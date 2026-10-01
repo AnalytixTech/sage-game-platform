@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { quizMasterRules } from '@sagegames/game-quiz-master';
 import { ConfigError } from '@sagegames/engine';
-import { Db, one } from '../db/db';
+import { Db, json, onConflictUpdate } from '../db/db';
 import { HttpError } from '../http/errors';
 
 /** Bank ids are used in session config (`bankId`), so keep them URL- and JSON-friendly. */
@@ -24,20 +24,27 @@ export interface QuizBank {
 }
 
 export async function listQuizBanks(db: Db, tenantId: string): Promise<QuizBankSummary[]> {
-  const rows = await db.query<{ bank_id: string; name: string; count: number; updated_at: Date }>(
-    `SELECT bank_id, name, jsonb_array_length(questions)::int AS count, updated_at
-       FROM quiz_banks WHERE tenant_id = $1 ORDER BY bank_id`,
-    [tenantId]
-  );
-  return rows.map((r) => ({ bankId: r.bank_id, name: r.name, questionCount: r.count, updatedAt: new Date(r.updated_at).toISOString() }));
+  const rows = await db
+    .selectFrom('sagegames_quiz_banks')
+    .select(['bank_id', 'name', 'questions', 'updated_at'])
+    .where('tenant_id', '=', tenantId)
+    .orderBy('bank_id')
+    .execute();
+  return rows.map((r) => ({
+    bankId: r.bank_id,
+    name: r.name,
+    questionCount: Array.isArray(r.questions) ? r.questions.length : 0,
+    updatedAt: r.updated_at.toISOString(),
+  }));
 }
 
 export async function getQuizBank(db: Db, tenantId: string, bankId: string): Promise<QuizBank> {
-  const row = await one<{ bank_id: string; name: string; questions: unknown[] }>(
-    db,
-    'SELECT bank_id, name, questions FROM quiz_banks WHERE tenant_id = $1 AND bank_id = $2',
-    [tenantId, bankId]
-  );
+  const row = await db
+    .selectFrom('sagegames_quiz_banks')
+    .select(['bank_id', 'name', 'questions'])
+    .where('tenant_id', '=', tenantId)
+    .where('bank_id', '=', bankId)
+    .executeTakeFirst();
   if (!row) throw new HttpError(404, 'Quiz bank not found', 'quiz_bank_not_found');
   return { bankId: row.bank_id, name: row.name, questions: row.questions };
 }
@@ -48,7 +55,8 @@ export async function saveQuizBank(
   tenantId: string,
   bankId: string,
   input: { name?: string; questions: unknown[] },
-  now: Date
+  now: Date,
+  createdBy: string | null = null
 ): Promise<QuizBankSummary> {
   if (!QUIZ_BANK_ID.test(bankId)) {
     throw new HttpError(400, 'Bank id may use letters, digits, - and _ (up to 64)', 'invalid_bank_id');
@@ -66,14 +74,15 @@ export async function saveQuizBank(
   }
   if (questions.length === 0) throw new HttpError(400, 'A bank needs at least one question', 'invalid_questions');
   const name = (input.name ?? '').trim().slice(0, 120);
-  await db.query(
-    `INSERT INTO quiz_banks (tenant_id, bank_id, name, questions, updated_at) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (tenant_id, bank_id) DO UPDATE SET name = EXCLUDED.name, questions = EXCLUDED.questions, updated_at = EXCLUDED.updated_at`,
-    [tenantId, bankId, name, JSON.stringify(questions), now]
-  );
+  await onConflictUpdate(
+    db,
+    db.insertInto('sagegames_quiz_banks').values({ tenant_id: tenantId, bank_id: bankId, name, questions: json(questions), created_by: createdBy, updated_at: now }),
+    ['tenant_id', 'bank_id'],
+    { name, questions: json(questions), updated_at: now }
+  ).execute();
   return { bankId, name, questionCount: questions.length, updatedAt: now.toISOString() };
 }
 
 export async function deleteQuizBank(db: Db, tenantId: string, bankId: string): Promise<void> {
-  await db.query('DELETE FROM quiz_banks WHERE tenant_id = $1 AND bank_id = $2', [tenantId, bankId]);
+  await db.deleteFrom('sagegames_quiz_banks').where('tenant_id', '=', tenantId).where('bank_id', '=', bankId).execute();
 }

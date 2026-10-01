@@ -1,7 +1,6 @@
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
-import type { Session, SupabaseClient } from '@supabase/supabase-js';
-import { api, AppSummary, init, PortalConfig } from './api';
-import { AuthPage, ResetPasswordPage } from './pages/Auth';
+import { api, AppSummary, auth, init, onAuthChange, PortalConfig, PortalUser } from './api';
+import { AccountPage, AuthPage, AuthMode, ResetPasswordPage, VerifyEmailPage } from './pages/Auth';
 import { AppsPage } from './pages/Apps';
 import { AppDetailPage, SECTIONS } from './pages/AppDetail';
 import { Link, useRoute } from './router';
@@ -32,55 +31,55 @@ function useThemeMode(): [ThemeMode, () => void] {
 }
 
 export function App() {
-  const [ready, setReady] = useState<{ supabase: SupabaseClient; config: PortalConfig } | null>(null);
+  const [config, setConfig] = useState<PortalConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [recovering, setRecovering] = useState(false);
+  const [user, setUser] = useState<PortalUser | null>(null);
   const route = useRoute();
   const themeMode = useThemeMode();
 
   useEffect(() => {
+    const off = onAuthChange(setUser);
     init()
-      .then(async (r) => {
-        const { data } = await r.supabase.auth.getSession();
-        setSession(data.session);
-        r.supabase.auth.onAuthStateChange((event, next) => {
-          setSession(next);
-          if (event === 'PASSWORD_RECOVERY') setRecovering(true);
-        });
-        setReady(r);
+      .then((r) => {
+        setUser(r.user);
+        setConfig(r.config);
       })
       .catch((e: Error) => setError(e.message));
+    return off;
   }, []);
 
   const inDocs = route[0] === 'docs';
 
   if (error && !inDocs) return <div className="center"><p className="error">{error}</p></div>;
-  if (!ready && !inDocs) return <div className="center muted">Loading…</div>;
+  // Links from account emails work signed in or out.
+  if (route[0] === 'verify-email') return <VerifyEmailPage />;
+  if (route[0] === 'reset-password') return <ResetPasswordPage />;
+  if (!config && !inDocs) return <div className="center muted">Loading…</div>;
 
   // The docs are public: readable before signing up.
   if (inDocs) {
     return (
       <ToastProvider>
         <Suspense fallback={<div className="content"><Skeleton lines={6} /></div>}>
-          <DocsApp route={route.slice(1)} signedIn={!!session} config={ready?.config ?? null} themeMode={themeMode} />
+          <DocsApp route={route.slice(1)} signedIn={!!user} config={config} themeMode={themeMode} />
         </Suspense>
       </ToastProvider>
     );
   }
 
-  const { supabase, config } = ready!;
-  if (recovering) return <ResetPasswordPage supabase={supabase} onDone={() => setRecovering(false)} />;
-  if (!session) return <AuthPage supabase={supabase} />;
+  if (!user) {
+    const mode: AuthMode = route[0] === 'signup' ? 'signup' : route[0] === 'forgot-password' ? 'forgot' : 'signin';
+    return <AuthPage mode={mode} />;
+  }
 
   const appId = route[0] === 'apps' ? route[1] : undefined;
   const section = route[2] ?? 'overview';
   const page =
-    appId !== undefined ? <AppDetailPage appId={appId} section={section} config={config} /> : <AppsPage />;
+    route[0] === 'account' ? <AccountPage /> : appId !== undefined ? <AppDetailPage appId={appId} section={section} config={config!} /> : <AppsPage />;
 
   return (
     <ToastProvider>
-      <Shell email={session.user.email ?? ''} appId={appId} section={section} onSignOut={() => supabase.auth.signOut()} themeMode={themeMode}>
+      <Shell email={user.email} appId={appId} section={section} onSignOut={() => void auth.signOut()} themeMode={themeMode}>
         {page}
       </Shell>
     </ToastProvider>
@@ -153,7 +152,7 @@ function Shell({
         </Link>
         <div className="sidebar-foot">
           <ThemeToggle themeMode={themeMode} />
-          <div className="account" title={email}>{email}</div>
+          <Link to="/account" className="account" title="Your account">{email}</Link>
           <button className="nav-item" style={{ background: 'none', width: '100%', justifyContent: 'flex-start' }} onClick={onSignOut}>
             <Icon name="logout" /> Sign out
           </button>

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Queryable } from '../db/db';
+import { Db, json } from '../db/db';
 
 export type WebhookEvent = 'session.completed' | 'match.finished';
 
@@ -7,12 +7,13 @@ export type WebhookEvent = 'session.completed' | 'match.finished';
  * Queue an event for the tenant (no-op when the tenant has no webhook URL). Call inside the business transaction.
  * `now` is the app clock (not the database's), so it's due on the same clock the dispatcher checks.
  */
-export async function enqueueWebhook(q: Queryable, tenantId: string, event: WebhookEvent, data: unknown, now: Date): Promise<void> {
-  await q.query(
-    `INSERT INTO webhook_deliveries (tenant_id, event_type, payload, created_at, next_attempt_at)
-     SELECT id, $2, $3, $4, $4 FROM tenants WHERE id = $1 AND webhook_url IS NOT NULL`,
-    [tenantId, event, JSON.stringify(data), now]
-  );
+export async function enqueueWebhook(q: Db, tenantId: string, event: WebhookEvent, data: unknown, now: Date): Promise<void> {
+  const tenant = await q.selectFrom('sagegames_tenants').select('webhook_url').where('id', '=', tenantId).executeTakeFirst();
+  if (!tenant?.webhook_url) return;
+  await q
+    .insertInto('sagegames_webhook_deliveries')
+    .values({ tenant_id: tenantId, event_type: event, payload: json(data), created_at: now, next_attempt_at: now })
+    .execute();
 }
 
 /** Signature header value: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<body>")>. */

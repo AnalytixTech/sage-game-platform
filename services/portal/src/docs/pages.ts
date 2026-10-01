@@ -24,7 +24,8 @@ export const PAGE_META: DocPageMeta[] = [
   { slug: 'api', title: 'API reference', section: 'Reference', file: 'docs/openapi.yaml', blurb: 'Every endpoint, the battle WebSocket and webhooks.' },
   { slug: 'sdk', title: 'SDK reference', section: 'Reference', file: 'docs/SDK_REFERENCE.md', blurb: 'Provider props, components, hooks and helpers.' },
   { slug: 'architecture', title: 'Architecture and security', section: 'Reference', file: 'docs/ARCHITECTURE.md', blurb: 'How scores are verified and what the platform trusts.' },
-  { slug: 'self-hosting', title: 'Self-hosting', section: 'Reference', file: 'docs/DEPLOYMENT.md', blurb: 'Run the platform on Supabase and Render.' },
+  { slug: 'self-hosting', title: 'Self-hosting', section: 'Reference', file: 'docs/DEPLOYMENT.md', blurb: 'Run the platform anywhere: Docker, Railway, any SQL database.' },
+  { slug: 'moving-to-3', title: 'Moving a 2.x deployment', section: 'Reference', file: 'docs/MOVING_TO_3.md', blurb: 'Export the old deployment and import it into 3.0; keys keep working.' },
   { slug: 'troubleshooting', title: 'Troubleshooting and FAQ', section: 'Reference', file: 'docs/TROUBLESHOOTING.md', blurb: 'Common errors and what they mean.' },
   { slug: 'changelog', title: 'Changelog', section: 'Reference', file: 'CHANGELOG.md', blurb: 'What changed in each release.' },
 ];

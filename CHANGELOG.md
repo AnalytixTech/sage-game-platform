@@ -1,6 +1,41 @@
 # Changelog
 
-All public packages share one version.
+All public packages share one version. Platform (server) releases are listed with them; a platform release that needs no SDK change, like 3.0, leaves the packages' version alone.
+
+## Platform 3.0.0
+
+Self-host anywhere, on any SQL database, with no Supabase. **SDK 2.x apps work unchanged:** the HTTP API, the battle WebSocket protocol, webhooks and their signatures are the same. The SDK packages stay at 2.3.
+
+**Any database**
+
+- `DATABASE_URL` chooses Postgres (`postgres://`), MySQL 8 / MariaDB 10.6+ (`mysql://`) or SQLite (`sqlite:./data/sagegames.db`, built into Node: no native module).
+- Every query moved to Kysely, written once for all three. Tables are named `sagegames_*`, with no schema or `search_path`, so transaction poolers work.
+- Migrations are TypeScript, one set for every dialect, applied under a lock: `npm run db:migrate`, the Railway pre-deploy command, or `server.js --migrate`. The server refuses to start while migrations are pending.
+- `/healthz` reports the database and whether migrations are current.
+- The full API suite runs on SQLite, Postgres, MySQL and MariaDB in CI, covering leaderboard ties and the webhook claim with concurrent workers.
+
+**Portal accounts, built in**
+
+- Sign-up with email confirmation, sign-in, forgot and reset password, change password, change email (with re-confirmation), sign out everywhere, and delete account, all at `/portal/api/auth/*`.
+- Passwords are hashed with scrypt.
+- Sessions use a short-lived access token plus a rotating refresh token in an `httpOnly` cookie; reusing a spent token signs the session out.
+- Rate limits apply per IP and per email, and sign-up and password reset answer the same whether or not an account exists.
+- Emails are sent by the API through Brevo (`BREVO_API_KEY`, `EMAIL_FROM`), with the same templates. Without a key, development logs the links.
+- `create-user` creates the first owner without email; `claim-tenant` gives an account an existing app.
+
+**Deploy anywhere**
+
+- A production `Dockerfile`: multi-stage, non-root, with a health check, migrations on start and a volume for SQLite.
+- A `railway.json` with pre-deploy migrations, a health check, restart on failure and one replica.
+- A new self-hosting guide covering Docker, Railway step by step, choosing a database, configuration, custom domains, email, backups per database and the one-instance rule.
+- Battles keep running on the platform's own WebSocket server, now with a 25-second heartbeat (inside proxy idle timeouts) and a `MatchBus` seam for multi-instance support later. The server warns when a second instance shares the database.
+- New settings: `DATABASE_URL` (any scheme), `DATABASE_POOL_SIZE`, `AUTH_JWT_SECRET`, `BREVO_API_KEY`, `EMAIL_FROM`, `RELEASE`. Removed: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`.
+
+**Moving from 2.x**
+
+- `export-supabase` reads the old deployment (the `sagegames` schema, plus portal accounts' emails), and `import` loads it into a fresh database of any dialect.
+- API keys keep working with the same `API_KEY_PEPPER`; accounts set a new password from an emailed link on first sign-in.
+- See [Moving a 2.x deployment](docs/MOVING_TO_3.md).
 
 ## 2.3.0
 

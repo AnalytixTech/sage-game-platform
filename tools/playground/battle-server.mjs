@@ -1,12 +1,11 @@
 // Dev-only battle server for the playground: the real API (services/api/dist) on an in-memory
-// Postgres (PGlite) with the real migrations, plus POST /dev/battle to set up a match.
+// database (SQLite by default; BATTLE_DB=pglite://memory for Postgres) with the real migrations,
+// plus POST /dev/battle to set up a match.
 //   npm run build:packages && node tools/playground/battle-server.mjs
-import fs from 'fs';
 import path from 'path';
 import http from 'http';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { PGlite } from '@electric-sql/pglite';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -18,24 +17,22 @@ const { attachRealtime } = api('realtime/wsServer.js');
 const { createTenant, createApiKey } = api('services/tenants.js');
 const { ALL_GAME_IDS } = api('catalog.js');
 const { createLogger } = api('observability/logger.js');
+const { createDb } = api('db/db.js');
+const { migrateToLatest } = api('db/migrate.js');
+const { createMailer } = api('email/mailer.js');
 
 const PORT = Number(process.env.PORT ?? 4100);
 
-const pg = await PGlite.create();
-await pg.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users (id UUID PRIMARY KEY, email TEXT);`);
-for (const f of fs.readdirSync(path.join(root, 'supabase/migrations')).sort()) {
-  await pg.exec(fs.readFileSync(path.join(root, 'supabase/migrations', f), 'utf8'));
-}
-await pg.exec('SET search_path TO sagegames, public');
-const wrap = (q) => ({ query: async (text, params) => (await q.query(text, params)).rows });
-const db = { ...wrap(pg), tx: (fn) => pg.transaction((tx) => fn(wrap(tx))), close: () => pg.close() };
+const db = await createDb(process.env.BATTLE_DB ?? 'sqlite::memory:');
+await migrateToLatest(db);
 
 const config = testConfig({ env: 'development' });
 await syncCatalog(db);
-await db.tx((q) => createTenant(q, { id: 'dev_app', name: 'Playground', gameIds: ALL_GAME_IDS }));
-const { key } = await createApiKey(db, { tenantId: 'dev_app', mode: 'live', label: 'dev', userId: null, pepper: config.apiKeyPepper });
+await db.transaction().execute((q) => createTenant(q, { id: 'dev_app', name: 'Playground', gameIds: ALL_GAME_IDS }, new Date()));
+const { key } = await createApiKey(db, { tenantId: 'dev_app', mode: 'live', label: 'dev', userId: null, pepper: config.apiKeyPepper }, new Date());
 
-const ctx = { db, config, verifyPortalToken: async () => null, now: () => new Date(), logger: createLogger({ level: 'warn', format: 'pretty' }) };
+const logger = createLogger({ level: 'warn', format: 'pretty' });
+const ctx = { db, config, mailer: createMailer({ production: false }, logger), now: () => new Date(), logger };
 const app = createApp(ctx, { realtime: { countdownMs: 3000, graceMs: 30_000, tickMs: 250, lingerMs: 120_000 } });
 
 const call = async (method, url, body) => {
@@ -65,7 +62,7 @@ const server = http.createServer(async (req, res) => {
     });
     const seats = [];
     for (const n of names) seats.push(await call('POST', `/v2/matches/${match.matchId}/tokens`, { externalUserId: n.toLowerCase() }));
-    const [row] = await db.query('SELECT seed, resolved_config FROM matches WHERE id = $1', [match.matchId]);
+    const row = await db.selectFrom('sagegames_matches').select(['seed', 'resolved_config']).where('id', '=', match.matchId).executeTakeFirstOrThrow();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ matchId: match.matchId, seats, names, seed: row.seed, config: row.resolved_config }));
   }
