@@ -37,7 +37,7 @@ Everything is tested on every database. The full API suite runs on SQLite, Postg
 | `DATABASE_URL` | yes | See above. |
 | `API_KEY_PEPPER` | in production | 32+ random characters. Mixed into API key hashes: **changing it invalidates every API key**, so store it safely. |
 | `AUTH_JWT_SECRET` | in production | 32+ random characters. Signs portal sessions; changing it signs everyone out of the portal. |
-| `PUBLIC_BASE_URL` | yes | Where the service is reachable, e.g. `https://sagegames.japabudz.com`. Email links point here. |
+| `PUBLIC_BASE_URL` | yes | Where the service is reachable, e.g. `https://sagegames.sageanalytix.cloud`. Email links point here. |
 | `BREVO_API_KEY`, `EMAIL_FROM` | for sign-up | Account emails (see [Email](#5-email)). Without them, development logs the links instead. |
 | `NODE_ENV` | | `production` on servers. |
 | `PORT` | | Default `4000`; most hosts set it. |
@@ -66,18 +66,18 @@ The repo includes a [`Dockerfile`](../Dockerfile) and a [`railway.json`](../rail
    - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}` (a reference to the database's private URL; for MySQL, `${{MySQL.MYSQL_URL}}`)
    - `NODE_ENV` = `production`
    - `API_KEY_PEPPER`, `AUTH_JWT_SECRET`: two different random values
-   - `PUBLIC_BASE_URL` = your domain, e.g. `https://sagegames.japabudz.com`
+   - `PUBLIC_BASE_URL` = your domain, e.g. `https://sagegames.sageanalytix.cloud`
    - `BREVO_API_KEY`, `EMAIL_FROM` (see [Email](#5-email))
 4. **Deploy.** Each deploy runs `node services/api/dist/scripts/migrate.js` first (the pre-deploy command), then starts the server. The deploy logs show `Applied 0001_init (postgres).` the first time, then `listening` with `database: "postgres"`.
-5. **Add the domain.** **Settings → Networking → Custom Domain** → `sagegames.japabudz.com`. Railway shows a CNAME record. Add it at your DNS provider (for `sagegames.japabudz.com`: a `CNAME` named `sagegames` pointing to the target Railway gives you). Railway issues the TLS certificate once DNS resolves.
+5. **Add the domain.** **Settings → Networking → Custom Domain** → `sagegames.sageanalytix.cloud`. Railway shows a CNAME record. Add it at your DNS provider (for `sagegames.sageanalytix.cloud`: a `CNAME` named `sagegames` pointing to the target Railway gives you). Railway issues the TLS certificate once DNS resolves.
 6. **Check it:**
 
    ```bash
-   curl https://sagegames.japabudz.com/healthz    # {"ok":true,"database":"postgres","migrations":"current"}
-   curl https://sagegames.japabudz.com/v2/games   # the five games
+   curl https://sagegames.sageanalytix.cloud/healthz    # {"ok":true,"database":"postgres","migrations":"current"}
+   curl https://sagegames.sageanalytix.cloud/v2/games   # the five games
    ```
 
-   Then open `https://sagegames.japabudz.com/portal/`, sign up and confirm the email (or [create the first account](#6-the-first-account) without email).
+   Then open `https://sagegames.sageanalytix.cloud/portal/`, sign up and confirm the email (or [create the first account](#6-the-first-account) without email).
 
 **SQLite on Railway:** add a volume to the service mounted at `/app/data` and set `DATABASE_URL=sqlite:/app/data/sagegames.db`. Volumes aren't attached during the pre-deploy step, so remove the pre-deploy command and set the start command to `node services/api/dist/server.js --migrate` instead.
 
@@ -132,9 +132,9 @@ The portal sends account emails itself: sign-up confirmation, password reset, em
    - a DMARC record if you have none: `v=DMARC1; p=none` is a safe start
 
    Wait until Brevo shows the domain as **Authenticated**, or mail lands in spam.
-2. **Add the sender** (e.g. `no-reply@japabudz.com`) under **Senders**.
+2. **Add the sender** (e.g. `no-reply@sageanalytix.cloud`) under **Senders**.
 3. **Create an API key** under **SMTP & API → API keys** (it starts with `xkeysib-`).
-4. Set `BREVO_API_KEY` and `EMAIL_FROM="SageGames <no-reply@japabudz.com>"` on the service.
+4. Set `BREVO_API_KEY` and `EMAIL_FROM="SageGames <no-reply@sageanalytix.cloud>"` on the service.
 5. Sign up at `/portal` with a real inbox. Delivery status is under **Brevo → Transactional → Logs**.
 
 Without a key, development and test runs log each email's links instead of sending them. Production answers "We couldn't send the email" until a key is set.

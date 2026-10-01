@@ -182,7 +182,7 @@ What the proxy must handle:
 **Caddy** in Docker on the `proxy` network: add the block from [`deploy/Caddyfile.example`](../deploy/Caddyfile.example):
 
 ```caddyfile
-sagegames.japabudz.com {
+sagegames.sageanalytix.cloud {
 	encode zstd gzip
 	reverse_proxy sagegames-app:4000 {
 		lb_try_duration 15s

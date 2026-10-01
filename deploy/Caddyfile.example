@@ -3,7 +3,7 @@
 # Add this block to the shared Caddyfile and reload Caddy:
 #   docker exec <caddy-container> caddy reload --config /etc/caddy/Caddyfile
 
-sagegames.japabudz.com {
+sagegames.sageanalytix.cloud {
 	encode zstd gzip
 
 	reverse_proxy sagegames-app:4000 {

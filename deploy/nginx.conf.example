@@ -15,17 +15,17 @@ upstream sagegames {
 
 server {
     listen 80;
-    server_name sagegames.japabudz.com;
+    server_name sagegames.sageanalytix.cloud;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
     http2 on;
-    server_name sagegames.japabudz.com;
+    server_name sagegames.sageanalytix.cloud;
 
-    ssl_certificate     /etc/letsencrypt/live/sagegames.japabudz.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/sagegames.japabudz.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/sagegames.sageanalytix.cloud/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sagegames.sageanalytix.cloud/privkey.pem;
 
     client_max_body_size 1m;   # API bodies are at most 256 KB
 
