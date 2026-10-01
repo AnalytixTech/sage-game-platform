@@ -12,6 +12,7 @@ The same docs are built into the developer portal at `/portal/docs`, with search
 - **API reference:** [docs/openapi.yaml](docs/openapi.yaml)
 - **What changed:** [CHANGELOG.md](CHANGELOG.md)
 - **Self-hosting (Docker, Railway, any SQL database):** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- **Docker on a shared VPS (Compose, reverse proxy, backups):** [docs/DOCKER.md](docs/DOCKER.md)
 - **Moving a 2.x deployment:** [docs/MOVING_TO_3.md](docs/MOVING_TO_3.md)
 - **How it works:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 

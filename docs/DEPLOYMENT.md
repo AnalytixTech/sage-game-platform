@@ -7,7 +7,7 @@ It runs anywhere a container or Node 22 runs. This guide covers:
 1. [Choosing a database](#1-choose-a-database)
 2. [Configuration](#2-configuration)
 3. [Railway, step by step](#3-railway-step-by-step)
-4. [Any host with Docker](#4-any-host-with-docker)
+4. [Any host with Docker](#4-any-host-with-docker) (a VPS shared with other products: [Docker deployment](DOCKER.md))
 5. [Email](#5-email)
 6. [The first account](#6-the-first-account)
 7. [Backups](#7-backups)
@@ -37,7 +37,7 @@ Everything is tested on every database. The full API suite runs on SQLite, Postg
 | `DATABASE_URL` | yes | See above. |
 | `API_KEY_PEPPER` | in production | 32+ random characters. Mixed into API key hashes: **changing it invalidates every API key**, so store it safely. |
 | `AUTH_JWT_SECRET` | in production | 32+ random characters. Signs portal sessions; changing it signs everyone out of the portal. |
-| `PUBLIC_BASE_URL` | yes | Where the service is reachable, e.g. `https://sagegames.japabudz.com`. Email links point here. |
+| `PUBLIC_BASE_URL` | yes | Where the service is reachable, e.g. `https://sagegames.sageanalytix.cloud`. Email links point here. |
 | `BREVO_API_KEY`, `EMAIL_FROM` | for sign-up | Account emails (see [Email](#5-email)). Without them, development logs the links instead. |
 | `NODE_ENV` | | `production` on servers. |
 | `PORT` | | Default `4000`; most hosts set it. |
@@ -66,26 +66,28 @@ The repo includes a [`Dockerfile`](../Dockerfile) and a [`railway.json`](../rail
    - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}` (a reference to the database's private URL; for MySQL, `${{MySQL.MYSQL_URL}}`)
    - `NODE_ENV` = `production`
    - `API_KEY_PEPPER`, `AUTH_JWT_SECRET`: two different random values
-   - `PUBLIC_BASE_URL` = your domain, e.g. `https://sagegames.japabudz.com`
+   - `PUBLIC_BASE_URL` = your domain, e.g. `https://sagegames.sageanalytix.cloud`
    - `BREVO_API_KEY`, `EMAIL_FROM` (see [Email](#5-email))
 4. **Deploy.** Each deploy runs `node services/api/dist/scripts/migrate.js` first (the pre-deploy command), then starts the server. The deploy logs show `Applied 0001_init (postgres).` the first time, then `listening` with `database: "postgres"`.
-5. **Add the domain.** **Settings → Networking → Custom Domain** → `sagegames.japabudz.com`. Railway shows a CNAME record. Add it at your DNS provider (for `sagegames.japabudz.com`: a `CNAME` named `sagegames` pointing to the target Railway gives you). Railway issues the TLS certificate once DNS resolves.
+5. **Add the domain.** **Settings → Networking → Custom Domain** → `sagegames.sageanalytix.cloud`. Railway shows a CNAME record. Add it at your DNS provider (for `sagegames.sageanalytix.cloud`: a `CNAME` named `sagegames` pointing to the target Railway gives you). Railway issues the TLS certificate once DNS resolves.
 6. **Check it:**
 
    ```bash
-   curl https://sagegames.japabudz.com/healthz    # {"ok":true,"database":"postgres","migrations":"current"}
-   curl https://sagegames.japabudz.com/v2/games   # the five games
+   curl https://sagegames.sageanalytix.cloud/healthz    # {"ok":true,"database":"postgres","migrations":"current"}
+   curl https://sagegames.sageanalytix.cloud/v2/games   # the five games
    ```
 
-   Then open `https://sagegames.japabudz.com/portal/`, sign up and confirm the email (or [create the first account](#6-the-first-account) without email).
+   Then open `https://sagegames.sageanalytix.cloud/portal/`, sign up and confirm the email (or [create the first account](#6-the-first-account) without email).
 
-**SQLite on Railway:** add a volume to the service mounted at `/app/data` and set `DATABASE_URL=sqlite:/app/data/sagegames.db`. Volumes aren't attached during the pre-deploy step, so remove the pre-deploy command and start with `node services/api/dist/server.js --migrate` instead (the Dockerfile's default command).
+**SQLite on Railway:** add a volume to the service mounted at `/app/data` and set `DATABASE_URL=sqlite:/app/data/sagegames.db`. Volumes aren't attached during the pre-deploy step, so remove the pre-deploy command and set the start command to `node services/api/dist/server.js --migrate` instead.
 
 **Keep one replica.** `railway.json` sets `numReplicas: 1`. Don't scale the service horizontally (see [One instance per deployment](#8-one-instance-per-deployment)). Give it more CPU and memory instead.
 
 **Proxies and WebSockets.** Battles use a WebSocket on `/v2/ws` through Railway's proxy, with nothing to configure. The server pings every connection every 25 seconds, well inside the proxy's idle timeout, so quiet lobbies stay open. It also keeps HTTP keep-alive connections open for 65 seconds, longer than the proxy does.
 
 ## 4. Any host with Docker
+
+On a VPS that hosts other products too, use the Compose setup in [Docker deployment](DOCKER.md): a shared reverse-proxy network, no published ports, resource limits, a hardened container, and backup and rollback steps. For a single container:
 
 ```bash
 docker build -t sagegames .
@@ -97,13 +99,13 @@ docker run -d --name sagegames -p 4000:4000 -v sagegames-data:/app/data \
   -e API_KEY_PEPPER=<random> -e AUTH_JWT_SECRET=<random> \
   -e PUBLIC_BASE_URL=https://games.example.com \
   -e BREVO_API_KEY=xkeysib-… -e EMAIL_FROM="SageGames <no-reply@example.com>" \
-  sagegames
+  sagegames node services/api/dist/server.js --migrate
 ```
 
 The image:
 
 - runs as an unprivileged user
-- applies pending migrations on start (`--migrate`, under a lock)
+- doesn't migrate on its own: add `--migrate` to the command (as above) to apply pending migrations on start, under a lock, or run `node services/api/dist/scripts/migrate.js` in a one-off container first
 - health-checks `/healthz`
 - keeps SQLite data in `/app/data`
 
@@ -130,9 +132,9 @@ The portal sends account emails itself: sign-up confirmation, password reset, em
    - a DMARC record if you have none: `v=DMARC1; p=none` is a safe start
 
    Wait until Brevo shows the domain as **Authenticated**, or mail lands in spam.
-2. **Add the sender** (e.g. `no-reply@japabudz.com`) under **Senders**.
+2. **Add the sender** (e.g. `no-reply@sageanalytix.cloud`) under **Senders**.
 3. **Create an API key** under **SMTP & API → API keys** (it starts with `xkeysib-`).
-4. Set `BREVO_API_KEY` and `EMAIL_FROM="SageGames <no-reply@japabudz.com>"` on the service.
+4. Set `BREVO_API_KEY` and `EMAIL_FROM="SageGames <no-reply@sageanalytix.cloud>"` on the service.
 5. Sign up at `/portal` with a real inbox. Delivery status is under **Brevo → Transactional → Logs**.
 
 Without a key, development and test runs log each email's links instead of sending them. Production answers "We couldn't send the email" until a key is set.
@@ -176,7 +178,8 @@ Scale up rather than out: one Node process handles thousands of concurrent playe
 Schema changes ship as migrations inside the API (`services/api/src/db/migrations/`). Each runs once per database and is recorded in `sagegames_migrations`. A lock (an advisory lock on Postgres, `GET_LOCK` on MySQL, the single writer on SQLite) means two deploys never migrate at once.
 
 - **Railway:** applied by the pre-deploy command on every deploy.
-- **Docker:** applied on start (`--migrate`).
+- **Docker Compose:** `docker compose run --rm sagegames-migrate` before `docker compose up -d` ([Docker deployment](DOCKER.md#database-migrations)).
+- **Single container:** start it with `--migrate`.
 - **By hand:** `npm run db:migrate`, or `node services/api/dist/scripts/migrate.js`.
 
 Without `--migrate`, the server refuses to start while migrations are pending and says how to apply them. `/healthz` answers `503` with `"migrations": "pending"` in that state.

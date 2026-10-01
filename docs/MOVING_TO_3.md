@@ -16,7 +16,7 @@ Follow [Self-hosting → Railway](DEPLOYMENT.md#3-railway-step-by-step) up to th
 - `API_KEY_PEPPER`: **the same value as on Render** (Render → the service → Environment). This is what keeps existing API keys valid.
 - a new `AUTH_JWT_SECRET`
 - `BREVO_API_KEY` and `EMAIL_FROM` (people need the "set your password" email)
-- `PUBLIC_BASE_URL`: the new address, e.g. `https://sagegames.japabudz.com`
+- `PUBLIC_BASE_URL`: the new address, e.g. `https://sagegames.sageanalytix.cloud`
 
 Don't create any accounts or apps on the new deployment yet: the import goes into an empty database.
 
@@ -56,11 +56,11 @@ Any database works as the target: Postgres, MySQL or SQLite.
 
 ## 4. Check before switching
 
-1. `curl https://sagegames.japabudz.com/healthz` returns `"migrations":"current"`.
+1. `curl https://sagegames.sageanalytix.cloud/healthz` returns `"migrations":"current"`.
 2. Create a session with an **existing** API key against the new URL:
 
    ```bash
-   curl -X POST https://sagegames.japabudz.com/v2/sessions \
+   curl -X POST https://sagegames.sageanalytix.cloud/v2/sessions \
      -H "Authorization: Bearer sk_live_…" -H "Content-Type: application/json" \
      -d '{"gameId":"game_memory_001","externalUserId":"migration_check"}'
    ```

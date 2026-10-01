@@ -1,0 +1,27 @@
+# SageGames behind a shared Caddy (in Docker, on the "proxy" network). Caddy obtains and renews the
+# TLS certificate, and passes WebSocket upgrades (/v2/ws, battles) through automatically.
+# Add this block to the shared Caddyfile and reload Caddy:
+#   docker exec <caddy-container> caddy reload --config /etc/caddy/Caddyfile
+
+sagegames.sageanalytix.cloud {
+	encode zstd gzip
+
+	reverse_proxy sagegames-app:4000 {
+		# While the container restarts (a redeploy takes a few seconds), hold requests and retry
+		# instead of failing them. Docker's own health check restarts an unhealthy app.
+		lb_try_duration 15s
+		lb_try_interval 250ms
+		# Battles keep WebSockets open for minutes; the app pings every 25 s.
+		stream_close_delay 5m
+	}
+
+	# Requests are small (JSON up to 256 KB); refuse anything absurd early.
+	request_body {
+		max_size 1MB
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
